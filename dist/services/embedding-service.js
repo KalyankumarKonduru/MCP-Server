@@ -1,44 +1,37 @@
 "use strict";
+// src/services/embedding-service.ts
+// This file is replaced by local-embedding-service.ts
+// Keeping this as a stub to prevent import errors
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.generateEmbedding = generateEmbedding;
-exports.semanticSearch = semanticSearch;
-const transformers_1 = require("@xenova/transformers");
-let embeddingPipeline = null;
-async function getEmbeddingPipeline() {
-    if (!embeddingPipeline) {
-        embeddingPipeline = await (0, transformers_1.pipeline)('feature-extraction', 'Xenova/all-MiniLM-L6-v2');
+exports.EmbeddingService = void 0;
+class EmbeddingService {
+    constructor(apiKey, model) {
+        console.warn('⚠️  EmbeddingService is deprecated. Use LocalEmbeddingService instead.');
     }
-    return embeddingPipeline;
-}
-async function generateEmbedding(text) {
-    try {
-        const extractor = await getEmbeddingPipeline();
-        // Truncate text to model's max length (512 tokens ~ 2000 chars)
-        const truncatedText = text.substring(0, 2000);
-        const output = await extractor(truncatedText, {
-            pooling: 'mean',
-            normalize: true
-        });
-        // Convert to regular array
-        return Array.from(output.data);
+    async generateEmbedding(text) {
+        throw new Error('EmbeddingService is deprecated. Use LocalEmbeddingService instead.');
     }
-    catch (error) {
-        console.error('Embedding generation error:', error);
-        throw new Error(`Failed to generate embedding: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    async generateEmbeddings(texts) {
+        throw new Error('EmbeddingService is deprecated. Use LocalEmbeddingService instead.');
     }
-}
-async function semanticSearch(query, options = {}) {
-    const { patientId, limit = 5 } = options;
-    try {
-        // Generate query embedding
-        const queryEmbedding = await generateEmbedding(query);
-        // Import MongoDB client here to avoid circular dependency
-        const { vectorSearch } = await import('../db/mongodb-client.js');
-        return await vectorSearch(queryEmbedding, { patientId, limit });
+    async generateMedicalDocumentEmbedding(title, content, medicalEntities) {
+        throw new Error('EmbeddingService is deprecated. Use LocalEmbeddingService instead.');
     }
-    catch (error) {
-        console.error('Semantic search error:', error);
-        throw new Error(`Semantic search failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    async generateQueryEmbedding(query, context) {
+        throw new Error('EmbeddingService is deprecated. Use LocalEmbeddingService instead.');
+    }
+    async calculateSimilarity(embedding1, embedding2) {
+        throw new Error('EmbeddingService is deprecated. Use LocalEmbeddingService instead.');
+    }
+    async findSimilarTexts(queryEmbedding, candidateEmbeddings, threshold = 0.7) {
+        throw new Error('EmbeddingService is deprecated. Use LocalEmbeddingService instead.');
+    }
+    getModelInfo() {
+        return {
+            model: 'deprecated',
+            dimensions: 0
+        };
     }
 }
+exports.EmbeddingService = EmbeddingService;
 //# sourceMappingURL=embedding-service.js.map

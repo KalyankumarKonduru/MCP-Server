@@ -1,186 +1,208 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.connectToMongoDB = connectToMongoDB;
-exports.saveDocument = saveDocument;
-exports.getDocument = getDocument;
-exports.updateDocumentStatus = updateDocumentStatus;
-exports.getPatientDocuments = getPatientDocuments;
-exports.searchDocuments = searchDocuments;
-exports.vectorSearch = vectorSearch;
-exports.closeConnection = closeConnection;
+exports.MongoDBClient = void 0;
 const mongodb_1 = require("mongodb");
-let client;
-let db;
-let documentsCollection;
-async function connectToMongoDB() {
-    try {
-        const uri = process.env.MONGODB_URI || 'mongodb://localhost:27017/medical-docs';
-        client = new mongodb_1.MongoClient(uri);
-        await client.connect();
-        console.log('Connected to MongoDB');
-        db = client.db();
-        documentsCollection = db.collection('documents');
-        // Create indexes
-        await createIndexes();
+class MongoDBClient {
+    client;
+    db; // Make db public for access in tools
+    documentsCollection;
+    entitiesCollection;
+    constructor(connectionString, dbName = 'medical_documents') {
+        this.client = new mongodb_1.MongoClient(connectionString);
+        this.db = this.client.db(dbName);
+        this.documentsCollection = this.db.collection('documents');
+        this.entitiesCollection = this.db.collection('entities');
     }
-    catch (error) {
-        console.error('MongoDB connection error:', error);
-        throw error;
-    }
-}
-async function createIndexes() {
-    // Text index for search
-    await documentsCollection.createIndex({ extractedText: 'text' });
-    // Compound index for patient queries
-    await documentsCollection.createIndex({
-        'metadata.patientName': 1,
-        'metadata.sessionId': 1,
-        uploadDate: -1
-    });
-    // Vector index for semantic search (if using MongoDB Atlas)
-    // Comment this out if not using Atlas
-    /*
-    try {
-      await documentsCollection.createIndex(
-        { embedding: '2dsphere' },
-        {
-          name: 'vector_index',
-          sparse: true
+    async connect() {
+        try {
+            await this.client.connect();
+            console.log('Connected to MongoDB Atlas');
+            // Create indexes for better performance
+            await this.createIndexes();
         }
-      );
-    } catch (error) {
-      console.log('Vector index creation skipped (requires MongoDB Atlas)');
-    }
-    */
-}
-// Document operations
-async function saveDocument(doc) {
-    // Convert Buffer to Binary for MongoDB storage
-    const docToSave = {
-        ...doc,
-        content: new mongodb_1.Binary(doc.content)
-    };
-    await documentsCollection.insertOne(docToSave);
-}
-async function getDocument(documentId) {
-    const doc = await documentsCollection.findOne({ _id: documentId });
-    if (doc && doc.content instanceof mongodb_1.Binary) {
-        // Convert Binary back to Buffer
-        return {
-            ...doc,
-            content: Buffer.from(doc.content.buffer)
-        };
-    }
-    return doc;
-}
-async function updateDocumentStatus(documentId, status, updates) {
-    await documentsCollection.updateOne({ _id: documentId }, {
-        $set: {
-            status,
-            ...updates
+        catch (error) {
+            console.error('Failed to connect to MongoDB:', error);
+            throw error;
         }
-    });
-}
-async function getPatientDocuments(patientIdentifier, sessionId) {
-    const query = {
-        $or: [
-            { 'metadata.patientName': new RegExp(patientIdentifier, 'i') },
-            { 'processedData.patientInfo.name': new RegExp(patientIdentifier, 'i') }
-        ]
-    };
-    if (sessionId) {
-        query['metadata.sessionId'] = sessionId;
     }
-    const docs = await documentsCollection
-        .find(query)
-        .sort({ uploadDate: -1 })
-        .toArray();
-    // Convert Binary to Buffer for each document
-    return docs.map(doc => {
-        if (doc.content instanceof mongodb_1.Binary) {
-            return {
-                ...doc,
-                content: Buffer.from(doc.content.buffer)
-            };
+    async disconnect() {
+        await this.client.close();
+        console.log('Disconnected from MongoDB Atlas');
+    }
+    async createIndexes() {
+        try {
+            // Text search index
+            await this.documentsCollection.createIndex({
+                title: 'text',
+                content: 'text'
+            });
+            // Vector search index (for Atlas Vector Search)
+            try {
+                await this.documentsCollection.createIndex({ embedding: "2dsphere" }, { name: "vector_index", background: true });
+            }
+            catch (error) {
+                // Vector index creation might fail if not supported
+                console.warn('Could not create vector index (normal for non-Atlas deployments)');
+            }
+            // Medical entity indexes
+            await this.documentsCollection.createIndex({ 'medicalEntities.label': 1 });
+            await this.documentsCollection.createIndex({ 'metadata.documentType': 1 });
+            await this.documentsCollection.createIndex({ 'metadata.patientId': 1 });
+            await this.documentsCollection.createIndex({ 'metadata.uploadedAt': -1 });
+            console.log('Database indexes created successfully');
         }
-        return doc;
-    });
-}
-async function searchDocuments(searchText, filters) {
-    const query = {
-        $text: { $search: searchText }
-    };
-    if (filters?.patientId) {
-        query['metadata.patientName'] = new RegExp(filters.patientId, 'i');
-    }
-    if (filters?.sessionId) {
-        query['metadata.sessionId'] = filters.sessionId;
-    }
-    const docs = await documentsCollection
-        .find(query)
-        .project({ score: { $meta: 'textScore' } })
-        .sort({ score: { $meta: 'textScore' } })
-        .limit(10)
-        .toArray();
-    return docs.map(doc => {
-        if (doc.content instanceof mongodb_1.Binary) {
-            return {
-                ...doc,
-                content: Buffer.from(doc.content.buffer)
-            };
+        catch (error) {
+            console.warn('Could not create some indexes:', error);
         }
-        return doc;
-    });
-}
-// Vector search (simplified version for non-Atlas MongoDB)
-async function vectorSearch(queryEmbedding, options = {}) {
-    const { patientId, limit = 5 } = options;
-    // For non-Atlas MongoDB, we'll do a simple cosine similarity search
-    // In production with Atlas, this would use the vector index
-    const documents = await documentsCollection
-        .find(patientId ? { 'metadata.patientName': new RegExp(patientId, 'i') } : {})
-        .toArray();
-    // Calculate cosine similarity
-    const results = documents
-        .filter(doc => doc.embedding && doc.embedding.length > 0)
-        .map(doc => {
-        const similarity = cosineSimilarity(queryEmbedding, doc.embedding);
-        return {
-            documentId: doc._id,
-            filename: doc.filename,
-            score: similarity,
-            excerpt: doc.extractedText?.substring(0, 200) + '...',
-            metadata: doc.metadata
-        };
-    })
-        .sort((a, b) => b.score - a.score)
-        .slice(0, limit);
-    return results;
-}
-// Helper function for cosine similarity
-function cosineSimilarity(a, b) {
-    if (a.length !== b.length)
-        return 0;
-    let dotProduct = 0;
-    let normA = 0;
-    let normB = 0;
-    for (let i = 0; i < a.length; i++) {
-        dotProduct += a[i] * b[i];
-        normA += a[i] * a[i];
-        normB += b[i] * b[i];
     }
-    return dotProduct / (Math.sqrt(normA) * Math.sqrt(normB));
-}
-// Cleanup
-async function closeConnection() {
-    if (client) {
-        await client.close();
+    async insertDocument(document) {
+        try {
+            document.metadata.uploadedAt = new Date();
+            const result = await this.documentsCollection.insertOne(document);
+            return result.insertedId.toString();
+        }
+        catch (error) {
+            console.error('Failed to insert document:', error);
+            throw error;
+        }
+    }
+    async updateDocument(id, updates) {
+        try {
+            const result = await this.documentsCollection.updateOne({ _id: id }, { $set: updates });
+            return result.modifiedCount > 0;
+        }
+        catch (error) {
+            console.error('Failed to update document:', error);
+            throw error;
+        }
+    }
+    async vectorSearch(queryEmbedding, limit = 10, threshold = 0.7, filter) {
+        try {
+            const pipeline = [
+                {
+                    $vectorSearch: {
+                        index: "vector_index",
+                        path: "embedding",
+                        queryVector: queryEmbedding,
+                        numCandidates: limit * 10,
+                        limit: limit
+                    }
+                },
+                {
+                    $addFields: {
+                        score: { $meta: "vectorSearchScore" }
+                    }
+                }
+            ];
+            if (filter) {
+                pipeline.push({ $match: filter });
+            }
+            pipeline.push({
+                $match: {
+                    score: { $gte: threshold }
+                }
+            });
+            const results = await this.documentsCollection.aggregate(pipeline).toArray();
+            return results.map(doc => ({
+                document: doc,
+                score: doc.score || 0,
+                relevantEntities: doc.medicalEntities || []
+            }));
+        }
+        catch (error) {
+            console.error('Vector search failed:', error);
+            // Fallback to text search
+            return this.textSearch(filter?.title || '', limit);
+        }
+    }
+    async textSearch(query, limit = 10) {
+        try {
+            const results = await this.documentsCollection
+                .find({ $text: { $search: query } })
+                .limit(limit)
+                .toArray();
+            return results.map(doc => ({
+                document: doc,
+                score: 0.5,
+                relevantEntities: doc.medicalEntities || []
+            }));
+        }
+        catch (error) {
+            console.error('Text search failed:', error);
+            throw error;
+        }
+    }
+    async findDocuments(filter = {}, limit = 50, offset = 0) {
+        try {
+            const results = await this.documentsCollection
+                .find(filter)
+                .skip(offset)
+                .limit(limit)
+                .sort({ 'metadata.uploadedAt': -1 })
+                .toArray();
+            return results;
+        }
+        catch (error) {
+            console.error('Failed to find documents:', error);
+            throw error;
+        }
+    }
+    async findDocumentById(id) {
+        try {
+            const result = await this.documentsCollection.findOne({ _id: id });
+            return result;
+        }
+        catch (error) {
+            console.error('Failed to find document by ID:', error);
+            throw error;
+        }
+    }
+    async deleteDocument(id) {
+        try {
+            const result = await this.documentsCollection.deleteOne({ _id: id });
+            return result.deletedCount > 0;
+        }
+        catch (error) {
+            console.error('Failed to delete document:', error);
+            throw error;
+        }
+    }
+    async countDocuments(filter = {}) {
+        try {
+            return await this.documentsCollection.countDocuments(filter);
+        }
+        catch (error) {
+            console.error('Failed to count documents:', error);
+            throw error;
+        }
+    }
+    async findByMedicalEntity(entityLabel, limit = 20) {
+        try {
+            const results = await this.documentsCollection
+                .find({ 'medicalEntities.label': entityLabel })
+                .limit(limit)
+                .sort({ 'metadata.uploadedAt': -1 })
+                .toArray();
+            return results;
+        }
+        catch (error) {
+            console.error('Failed to find documents by medical entity:', error);
+            throw error;
+        }
+    }
+    async getPatientDocuments(patientId) {
+        try {
+            const results = await this.documentsCollection
+                .find({ 'metadata.patientId': patientId })
+                .sort({ 'metadata.uploadedAt': -1 })
+                .toArray();
+            return results;
+        }
+        catch (error) {
+            console.error('Failed to get patient documents:', error);
+            throw error;
+        }
     }
 }
-// Graceful shutdown
-process.on('SIGINT', async () => {
-    console.log('Closing MongoDB connection...');
-    await closeConnection();
-    process.exit(0);
-});
+exports.MongoDBClient = MongoDBClient;
 //# sourceMappingURL=mongodb-client.js.map

@@ -7,12 +7,13 @@ import {
 import dotenv from 'dotenv';
 
 import { MongoDBClient } from './db/mongodb-client.js';
-import { EmbeddingService } from './services/embedding-service.js';
+import { LocalEmbeddingService } from './services/local-embedding-service.js';
 import { MedicalNERService } from './services/medical-ner-service.js';
 import { OCRService } from './services/ocr-service.js';
 import { PDFService } from './services/pdf-service.js';
 import { DocumentTools } from './tools/document-tools.js';
 import { MedicalTools } from './tools/medical-tools.js';
+import { LocalEmbeddingTools } from './tools/local-embedding-tools.js';
 
 // Load environment variables
 dotenv.config();
@@ -21,6 +22,9 @@ dotenv.config();
 const isStdioMode = process.argv.includes('--stdio') || 
                    process.stdin.isTTY === false ||
                    process.env.MCP_STDIO_MODE === 'true';
+
+// Detect if running in HTTP mode
+const isHttpMode = process.env.MCP_HTTP_MODE === 'true';
 
 // Custom logger that respects stdio mode
 const logger = {
@@ -40,30 +44,26 @@ const logger = {
 export class MedicalMCPServer {
   private server: Server;
   private mongoClient: MongoDBClient;
-  private embeddingService: EmbeddingService;
+  private localEmbeddingService: LocalEmbeddingService;
   private nerService: MedicalNERService;
   private ocrService: OCRService;
   private pdfService: PDFService;
   private documentTools: DocumentTools;
   private medicalTools: MedicalTools;
+  private localEmbeddingTools: LocalEmbeddingTools;
 
   constructor() {
     // Validate required environment variables
     const mongoConnectionString = process.env.MONGODB_CONNECTION_STRING;
-    const openaiApiKey = process.env.OPENAI_API_KEY;
     const dbName = process.env.MONGODB_DATABASE_NAME || 'medical_documents';
 
     if (!mongoConnectionString) {
       throw new Error('MONGODB_CONNECTION_STRING environment variable is required');
     }
 
-    if (!openaiApiKey) {
-      throw new Error('OPENAI_API_KEY environment variable is required');
-    }
-
     // Initialize services
     this.mongoClient = new MongoDBClient(mongoConnectionString, dbName);
-    this.embeddingService = new EmbeddingService(openaiApiKey);
+    this.localEmbeddingService = new LocalEmbeddingService(); // Using local HuggingFace model
     this.nerService = new MedicalNERService();
     this.ocrService = new OCRService();
     this.pdfService = new PDFService();
@@ -71,7 +71,7 @@ export class MedicalMCPServer {
     // Initialize tools
     this.documentTools = new DocumentTools(
       this.mongoClient,
-      this.embeddingService,
+      this.localEmbeddingService, // Using local embedding service instead of OpenAI
       this.nerService,
       this.ocrService,
       this.pdfService
@@ -80,15 +80,18 @@ export class MedicalMCPServer {
     this.medicalTools = new MedicalTools(
       this.mongoClient,
       this.nerService,
-      this.embeddingService
+      this.localEmbeddingService // Using local embedding service
     );
+
+    // Initialize local embedding tools
+    this.localEmbeddingTools = new LocalEmbeddingTools(this.mongoClient);
 
     // Initialize MCP server
     this.server = new Server(
       {
         name: 'medical-mcp-server',
         version: '1.0.0',
-        description: 'Medical MCP Server with document processing, NER, and vector search capabilities'
+        description: 'Medical MCP Server with local embeddings, document processing, NER, and vector search capabilities'
       },
       {
         capabilities: {
@@ -105,11 +108,13 @@ export class MedicalMCPServer {
     this.server.setRequestHandler(ListToolsRequestSchema, async () => {
       const documentToolsList = this.documentTools.getAllTools();
       const medicalToolsList = this.medicalTools.getAllTools();
+      const localEmbeddingToolsList = this.localEmbeddingTools.getAllTools();
       
       return {
         tools: [
           ...documentToolsList,
-          ...medicalToolsList
+          ...medicalToolsList,
+          ...localEmbeddingToolsList
         ],
       };
     });
@@ -126,45 +131,55 @@ export class MedicalMCPServer {
         switch (name) {
           // Document tools
           case 'uploadDocument':
-            return await this.documentTools.handleUploadDocument(args);
+            return await this.documentTools.handleUploadDocument(args as any || {});
 
           case 'searchDocuments':
-            return await this.documentTools.handleSearchDocuments(args);
+            return await this.documentTools.handleSearchDocuments(args as any || {});
 
           case 'listDocuments':
-            return await this.documentTools.handleListDocuments(args);
+            return await this.documentTools.handleListDocuments(args as any || {});
 
           // Medical tools
           case 'extractMedicalEntities':
-            return await this.medicalTools.handleExtractMedicalEntities(args);
+            return await this.medicalTools.handleExtractMedicalEntities(args as any || {});
 
           case 'findSimilarCases':
-            return await this.medicalTools.handleFindSimilarCases(args);
+            return await this.medicalTools.handleFindSimilarCases(args as any || {});
 
           case 'analyzePatientHistory':
-            return await this.medicalTools.handleAnalyzePatientHistory(args);
+            return await this.medicalTools.handleAnalyzePatientHistory(args as any || {});
 
           case 'getMedicalInsights':
-            return await this.medicalTools.handleMedicalInsights(args);
+            return await this.medicalTools.handleMedicalInsights(args as any || {});
+
+          // Local embedding tools
+          case 'generateEmbeddingLocal':
+            return await this.localEmbeddingTools.handleGenerateEmbedding(args as any || {});
+
+          case 'chunkAndEmbedDocument':
+            return await this.localEmbeddingTools.handleChunkAndEmbed(args as any || {});
+
+          case 'semanticSearchLocal':
+            return await this.localEmbeddingTools.handleSemanticSearch(args as any || {});
 
           // Legacy tool names for backward compatibility
           case 'upload_document':
-            return await this.documentTools.handleUploadDocument(args);
+            return await this.documentTools.handleUploadDocument(args as any || {});
 
           case 'extract_text':
-            return await this.handleExtractText(args);
+            return await this.handleExtractText(args || {});
 
           case 'extract_medical_entities':
-            return await this.medicalTools.handleExtractMedicalEntities(args);
+            return await this.medicalTools.handleExtractMedicalEntities(args as any || {});
 
           case 'search_by_diagnosis':
-            return await this.handleSearchByDiagnosis(args);
+            return await this.handleSearchByDiagnosis(args || {});
 
           case 'semantic_search':
-            return await this.handleSemanticSearch(args);
+            return await this.handleSemanticSearch(args || {});
 
           case 'get_patient_summary':
-            return await this.handleGetPatientSummary(args);
+            return await this.handleGetPatientSummary(args || {});
 
           default:
             throw new Error(`Unknown tool: ${name}`);
@@ -187,6 +202,56 @@ export class MedicalMCPServer {
         };
       }
     });
+  }
+
+  // Handle tool calls for HTTP mode
+  private async handleToolCall(name: string, args: any): Promise<any> {
+    try {
+      switch (name) {
+        // Document tools
+        case 'uploadDocument':
+          return await this.documentTools.handleUploadDocument(args as any || {});
+        case 'searchDocuments':
+          return await this.documentTools.handleSearchDocuments(args as any || {});
+        case 'listDocuments':
+          return await this.documentTools.handleListDocuments(args as any || {});
+
+        // Medical tools
+        case 'extractMedicalEntities':
+          return await this.medicalTools.handleExtractMedicalEntities(args as any || {});
+        case 'findSimilarCases':
+          return await this.medicalTools.handleFindSimilarCases(args as any || {});
+        case 'analyzePatientHistory':
+          return await this.medicalTools.handleAnalyzePatientHistory(args as any || {});
+        case 'getMedicalInsights':
+          return await this.medicalTools.handleMedicalInsights(args as any || {});
+
+        // Local embedding tools
+        case 'generateEmbeddingLocal':
+          return await this.localEmbeddingTools.handleGenerateEmbedding(args as any || {});
+        case 'chunkAndEmbedDocument':
+          return await this.localEmbeddingTools.handleChunkAndEmbed(args as any || {});
+        case 'semanticSearchLocal':
+          return await this.localEmbeddingTools.handleSemanticSearch(args as any || {});
+
+        default:
+          throw new Error(`Unknown tool: ${name}`);
+      }
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify({
+              success: false,
+              error: error instanceof Error ? error.message : 'Unknown error occurred',
+              tool: name
+            }, null, 2)
+          }
+        ],
+        isError: true
+      };
+    }
   }
 
   // Legacy compatibility handlers
@@ -224,10 +289,10 @@ export class MedicalMCPServer {
   }
 
   private async handleSemanticSearch(args: any): Promise<any> {
-    return await this.documentTools.handleSearchDocuments({
+    return await this.localEmbeddingTools.handleSemanticSearch({
       query: args.query,
       filter: args.patientId ? { patientId: args.patientId } : undefined,
-      limit: args.limit || 5
+      topK: args.limit || 5
     });
   }
 
@@ -240,7 +305,10 @@ export class MedicalMCPServer {
 
   async start(): Promise<void> {
     try {
-      if (isStdioMode) {
+      if (isHttpMode) {
+        logger.log('🏥 Medical MCP Server v1.0.0 (HTTP Mode)');
+        logger.log('==========================================');
+      } else if (isStdioMode) {
         logger.error('Starting Medical MCP Server in stdio mode...');
       } else {
         logger.log('🏥 Medical MCP Server v1.0.0');
@@ -256,6 +324,14 @@ export class MedicalMCPServer {
         logger.log('✓ MongoDB connection established');
       }
 
+      // Initialize local embedding service
+      await this.localEmbeddingService.initialize();
+      if (isStdioMode) {
+        logger.error('Local embedding service initialized successfully');
+      } else {
+        logger.log('✓ Local embedding service initialized (HuggingFace Transformers)');
+      }
+
       // Initialize OCR service
       await this.ocrService.initialize();
       if (isStdioMode) {
@@ -265,50 +341,171 @@ export class MedicalMCPServer {
       }
 
       // Start the MCP server
-      const transport = new StdioServerTransport();
-      await this.server.connect(transport);
-      
-      if (isStdioMode) {
-        logger.error('Medical MCP Server running on stdio transport');
-        logger.error('Ready to accept commands');
+      if (isHttpMode) {
+        // HTTP mode setup
+        const express = await import('express');
+        const cors = await import('cors');
+        
+        const app = express.default();
+        app.use(cors.default());
+        app.use(express.default.json());
+
+        // Health check endpoint
+        app.get('/health', (req, res) => {
+          res.json({
+            status: 'healthy',
+            server: 'medical-mcp-server',
+            version: '1.0.0',
+            timestamp: new Date().toISOString()
+          });
+        });
+
+        // MCP endpoint
+        app.post('/mcp', async (req, res) => {
+          try {
+            // Handle MCP requests via HTTP
+            const request = req.body;
+            
+            // Set appropriate headers for Streamable HTTP
+            res.setHeader('Content-Type', 'application/json');
+            
+            // Generate session ID if not present
+            let sessionId = req.headers['mcp-session-id'] as string;
+            if (!sessionId && request.method === 'initialize') {
+              sessionId = `session-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+              res.setHeader('mcp-session-id', sessionId);
+              logger.log('📋 New session initialized:', sessionId);
+            }
+
+            // Process the MCP request
+            if (request.method === 'initialize') {
+              res.json({
+                jsonrpc: '2.0',
+                result: {
+                  protocolVersion: '2024-11-05',
+                  capabilities: {
+                    tools: {}
+                  },
+                  serverInfo: {
+                    name: 'medical-mcp-server',
+                    version: '1.0.0'
+                  }
+                },
+                id: request.id
+              });
+            } else if (request.method === 'tools/list') {
+              const listResult = await this.server.setRequestHandler(ListToolsRequestSchema, async () => {
+                const documentTools = this.documentTools.getAllTools();
+                const medicalTools = this.medicalTools.getAllTools();
+                const localEmbeddingTools = this.localEmbeddingTools.getAllTools();
+                
+                return {
+                  tools: [
+                    ...documentTools,
+                    ...medicalTools,
+                    ...localEmbeddingTools
+                  ],
+                };
+              });
+              
+              res.json({
+                jsonrpc: '2.0',
+                result: {
+                  tools: [
+                    ...this.documentTools.getAllTools(),
+                    ...this.medicalTools.getAllTools(),
+                    ...this.localEmbeddingTools.getAllTools()
+                  ]
+                },
+                id: request.id
+              });
+            } else if (request.method === 'tools/call') {
+              // Handle tool calls manually
+              const toolResult = await this.handleToolCall(request.params.name, request.params.arguments);
+              
+              res.json({
+                jsonrpc: '2.0',
+                result: toolResult,
+                id: request.id
+              });
+            } else {
+              res.status(400).json({
+                jsonrpc: '2.0',
+                error: {
+                  code: -32601,
+                  message: 'Method not found'
+                },
+                id: request.id
+              });
+            }
+          } catch (error) {
+            logger.error('HTTP request error:', error);
+            res.status(500).json({
+              jsonrpc: '2.0',
+              error: {
+                code: -32603,
+                message: 'Internal error'
+              },
+              id: req.body?.id || null
+            });
+          }
+        });
+
+        const port = process.env.MCP_HTTP_PORT || 3001;
+        app.listen(port, () => {
+          logger.log(`🚀 HTTP Server is ready to accept connections`);
+          logger.log(`📊 Server Information:`);
+          logger.log(`======================`);
+          logger.log(`✓ HTTP Server listening on port ${port}`);
+          logger.log(`🌐 Health check: http://localhost:${port}/health`);
+          logger.log(`🔗 MCP endpoint: http://localhost:${port}/mcp`);
+          
+          this.logServerInfo();
+        });
       } else {
-        logger.log('✓ Medical MCP Server started successfully');
+        // Stdio mode
+        const transport = new StdioServerTransport();
+        await this.server.connect(transport);
         
-        // Log available tools
-        const documentTools = this.documentTools.getAllTools();
-        const medicalTools = this.medicalTools.getAllTools();
-        logger.log(`✓ Loaded ${documentTools.length} document tools and ${medicalTools.length} medical tools`);
-        
-        logger.log('\n📊 Server Information:');
-        logger.log('======================');
-        
-        try {
-          const stats = await this.getStatistics();
-          logger.log(`📄 Documents in database: ${stats.documentsCount}`);
-          logger.log(`🔧 Tools available: ${stats.toolsAvailable}`);
-          logger.log(`🤖 Embedding model: ${stats.embeddingModel}`);
-          logger.log(`⏱️  Server uptime: ${Math.round(stats.uptime)}s`);
-        } catch (error) {
-          logger.log('📊 Statistics unavailable during startup');
+        if (isStdioMode) {
+          logger.error('Medical MCP Server running on stdio transport');
+          logger.error('Ready to accept commands');
+        } else {
+          logger.log('✓ Medical MCP Server started successfully');
+          this.logServerInfo();
         }
-        
-        logger.log('\n🚀 Server is ready to accept connections');
-        logger.log('📝 Available tools:');
-        logger.log('   📤 uploadDocument - Upload and process medical documents');
-        logger.log('   🔍 searchDocuments - Search documents with semantic similarity');
-        logger.log('   📋 listDocuments - List documents with filtering');
-        logger.log('   🏷️  extractMedicalEntities - Extract medical entities from text');
-        logger.log('   🔗 findSimilarCases - Find similar medical cases');
-        logger.log('   📈 analyzePatientHistory - Analyze patient medical history');
-        logger.log('   💡 getMedicalInsights - Get medical insights and recommendations');
-        
-        logger.log('\n💬 The server is now listening for MCP client connections...');
       }
       
     } catch (error) {
       logger.error('Failed to start server:', error);
       await this.cleanup();
       process.exit(1);
+    }
+  }
+
+  private async logServerInfo(): Promise<void> {
+    try {
+      const stats = await this.getStatistics();
+      logger.log(`📄 Documents in database: ${stats.documentsCount}`);
+      logger.log(`🔧 Tools available: ${stats.toolsAvailable}`);
+      logger.log(`🤖 Embedding model: ${stats.embeddingModel} (Local)`);
+      logger.log(`⏱️  Server uptime: ${Math.round(stats.uptime)}s`);
+      
+      logger.log('\n📝 Available tools:');
+      logger.log('   📤 uploadDocument - Upload and process medical documents');
+      logger.log('   🔍 searchDocuments - Search documents with semantic similarity');
+      logger.log('   📋 listDocuments - List documents with filtering');
+      logger.log('   🏷️  extractMedicalEntities - Extract medical entities from text');
+      logger.log('   🔗 findSimilarCases - Find similar medical cases');
+      logger.log('   📈 analyzePatientHistory - Analyze patient medical history');
+      logger.log('   💡 getMedicalInsights - Get medical insights and recommendations');
+      logger.log('   🧠 generateEmbeddingLocal - Generate embeddings locally');
+      logger.log('   📄 chunkAndEmbedDocument - Chunk and embed large documents');
+      logger.log('   🔍 semanticSearchLocal - Search using local embeddings');
+      
+      logger.log('\n💬 The server is now listening for MCP client connections...');
+    } catch (error) {
+      logger.log('📊 Statistics unavailable during startup');
     }
   }
 
@@ -327,6 +524,7 @@ export class MedicalMCPServer {
       // Cleanup services
       await this.mongoClient.disconnect();
       await this.ocrService.terminate();
+      await this.localEmbeddingService.shutdown();
       
       logger.error('✓ All services cleaned up');
     } catch (error) {
@@ -352,14 +550,8 @@ export class MedicalMCPServer {
       allHealthy = false;
     }
 
-    try {
-      // Check embedding service
-      await this.embeddingService.generateEmbedding('test');
-      services.embedding = true;
-    } catch {
-      services.embedding = false;
-      allHealthy = false;
-    }
+    services.localEmbedding = this.localEmbeddingService.isReady();
+    if (!services.localEmbedding) allHealthy = false;
 
     services.ner = true; // NER service is always available
     services.ocr = this.ocrService ? true : false;
@@ -383,11 +575,12 @@ export class MedicalMCPServer {
       const documentsCount = await this.mongoClient.countDocuments();
       const documentTools = this.documentTools.getAllTools();
       const medicalTools = this.medicalTools.getAllTools();
-      const embeddingModel = this.embeddingService.getModelInfo();
+      const localEmbeddingTools = this.localEmbeddingTools.getAllTools();
+      const embeddingModel = this.localEmbeddingService.getModelInfo();
 
       return {
         documentsCount,
-        toolsAvailable: documentTools.length + medicalTools.length,
+        toolsAvailable: documentTools.length + medicalTools.length + localEmbeddingTools.length,
         embeddingModel: embeddingModel.model,
         uptime: process.uptime()
       };
@@ -419,4 +612,3 @@ process.on('unhandledRejection', (reason, promise) => {
   logger.error('Unhandled Rejection at:', promise, 'reason:', reason);
   process.exit(1);
 });
-

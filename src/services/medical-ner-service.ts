@@ -254,22 +254,6 @@ export class MedicalNERService {
         }
       });
 
-      // Extract dates (appointment dates, symptom onset)
-      const dates = doc.dates().out('array');
-      dates.forEach((date: string) => {
-        const index = text.toLowerCase().indexOf(date.toLowerCase());
-        if (index !== -1) {
-          entities.push({
-            text: date,
-            label: 'DATE',
-            confidence: 0.9,
-            start: index,
-            end: index + date.length,
-            context: this.getContext(text, index, date.length)
-          });
-        }
-      });
-
       // Extract numbers (could be dosages, measurements)
       const numbers = doc.numbers().out('array');
       numbers.forEach((number: string) => {
@@ -361,4 +345,3 @@ export class MedicalNERService {
     return stats;
   }
 }
-

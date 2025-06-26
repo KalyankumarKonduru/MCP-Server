@@ -1,10 +1,15 @@
 import { EmbeddingServiceInterface } from '../interfaces/embedding-interface.js';
 export interface EmbeddingResult {
     embedding: number[];
-    tokenCount: number;
+    dimensions: number;
+    model: string;
 }
-export declare class EmbeddingService implements EmbeddingServiceInterface {
-    constructor(apiKey?: string, model?: string);
+export declare class LocalEmbeddingService implements EmbeddingServiceInterface {
+    private embedder;
+    private isLoading;
+    private model;
+    constructor(model?: string);
+    initialize(): Promise<void>;
     generateEmbedding(text: string): Promise<number[]>;
     generateEmbeddings(texts: string[]): Promise<number[][]>;
     generateMedicalDocumentEmbedding(title: string, content: string, medicalEntities?: Array<{
@@ -12,6 +17,7 @@ export declare class EmbeddingService implements EmbeddingServiceInterface {
         label: string;
     }>): Promise<number[]>;
     generateQueryEmbedding(query: string, context?: string): Promise<number[]>;
+    private preprocessText;
     calculateSimilarity(embedding1: number[], embedding2: number[]): Promise<number>;
     findSimilarTexts(queryEmbedding: number[], candidateEmbeddings: Array<{
         id: string;
@@ -23,6 +29,9 @@ export declare class EmbeddingService implements EmbeddingServiceInterface {
     getModelInfo(): {
         model: string;
         dimensions: number;
+        isLocal: boolean;
     };
+    isReady(): boolean;
+    shutdown(): Promise<void>;
 }
-//# sourceMappingURL=embedding-service.d.ts.map
+//# sourceMappingURL=local-embedding-service.d.ts.map

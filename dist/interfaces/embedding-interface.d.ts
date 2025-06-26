@@ -1,10 +1,4 @@
-import { EmbeddingServiceInterface } from '../interfaces/embedding-interface.js';
-export interface EmbeddingResult {
-    embedding: number[];
-    tokenCount: number;
-}
-export declare class EmbeddingService implements EmbeddingServiceInterface {
-    constructor(apiKey?: string, model?: string);
+export interface EmbeddingServiceInterface {
     generateEmbedding(text: string): Promise<number[]>;
     generateEmbeddings(texts: string[]): Promise<number[][]>;
     generateMedicalDocumentEmbedding(title: string, content: string, medicalEntities?: Array<{
@@ -25,4 +19,4 @@ export declare class EmbeddingService implements EmbeddingServiceInterface {
         dimensions: number;
     };
 }
-//# sourceMappingURL=embedding-service.d.ts.map
+//# sourceMappingURL=embedding-interface.d.ts.map

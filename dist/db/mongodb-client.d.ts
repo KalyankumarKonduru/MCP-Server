@@ -1,34 +1,50 @@
-interface MedicalDocument {
-    _id: string;
-    filename: string;
-    mimeType: string;
-    uploadDate: Date;
-    fileSize: number;
-    content: Buffer;
-    status: 'uploaded' | 'processing' | 'text_extracted' | 'processed' | 'error';
-    metadata: {
-        patientName?: string;
-        sessionId: string;
-        description?: string;
-    };
-    extractedText: string | null;
-    processedData: any | null;
+import { Db } from 'mongodb';
+export interface MedicalDocument {
+    _id?: string;
+    title: string;
+    content: string;
     embedding?: number[];
-    error?: string;
+    medicalEntities?: MedicalEntity[];
+    metadata: {
+        uploadedAt: Date;
+        fileType?: string;
+        size?: number;
+        tags?: string[];
+        patientId?: string;
+        documentType?: 'clinical_note' | 'lab_report' | 'prescription' | 'discharge_summary' | 'other';
+        processed?: boolean;
+    };
 }
-export declare function connectToMongoDB(): Promise<void>;
-export declare function saveDocument(doc: MedicalDocument): Promise<void>;
-export declare function getDocument(documentId: string): Promise<MedicalDocument | null>;
-export declare function updateDocumentStatus(documentId: string, status: MedicalDocument['status'], updates?: Partial<MedicalDocument>): Promise<void>;
-export declare function getPatientDocuments(patientIdentifier: string, sessionId?: string): Promise<MedicalDocument[]>;
-export declare function searchDocuments(searchText: string, filters?: {
-    patientId?: string;
-    sessionId?: string;
-}): Promise<MedicalDocument[]>;
-export declare function vectorSearch(queryEmbedding: number[], options?: {
-    patientId?: string;
-    limit?: number;
-}): Promise<any[]>;
-export declare function closeConnection(): Promise<void>;
-export {};
+export interface MedicalEntity {
+    text: string;
+    label: string;
+    confidence: number;
+    start: number;
+    end: number;
+}
+export interface SearchResult {
+    document: MedicalDocument;
+    score: number;
+    relevantEntities?: MedicalEntity[];
+}
+export declare class MongoDBClient {
+    private client;
+    db: Db;
+    private documentsCollection;
+    private entitiesCollection;
+    constructor(connectionString: string, dbName?: string);
+    connect(): Promise<void>;
+    disconnect(): Promise<void>;
+    private createIndexes;
+    insertDocument(document: MedicalDocument): Promise<string>;
+    updateDocument(id: string, updates: Partial<MedicalDocument>): Promise<boolean>;
+    vectorSearch(queryEmbedding: number[], limit?: number, threshold?: number, filter?: Record<string, any>): Promise<SearchResult[]>;
+    textSearch(query: string, limit?: number): Promise<SearchResult[]>;
+    findDocuments(filter?: Record<string, any>, limit?: number, offset?: number): Promise<MedicalDocument[]>;
+    findDocumentById(id: string): Promise<MedicalDocument | null>;
+    deleteDocument(id: string): Promise<boolean>;
+    countDocuments(filter?: Record<string, any>): Promise<number>;
+    findByMedicalEntity(entityLabel: string, limit?: number): Promise<MedicalDocument[]>;
+    getPatientDocuments(patientId: string): Promise<MedicalDocument[]>;
+}
 //# sourceMappingURL=mongodb-client.d.ts.map

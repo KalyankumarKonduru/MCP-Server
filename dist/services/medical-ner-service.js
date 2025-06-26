@@ -1,184 +1,297 @@
 "use strict";
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.extractMedicalEntities = extractMedicalEntities;
-// Medical patterns for entity extraction
-const PATTERNS = {
-    // Patient patterns
-    patientName: /(?:Patient(?:\s+Name)?:\s*|Name:\s*)([A-Z][a-z]+ [A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)/gi,
-    dob: /(?:DOB|Date of Birth|Birth Date):\s*(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4})/gi,
-    mrn: /(?:MRN|Medical Record Number|Medical Record #):\s*([A-Z0-9\-]+)/gi,
-    age: /(?:Age:\s*|Patient Age:\s*)(\d{1,3})\s*(?:years?|yrs?|y\.o\.)/gi,
-    // Diagnosis patterns
-    diagnosis: /(?:Diagnosis|Dx|Impression|Assessment):\s*(.+?)(?=\n|$)/gi,
-    icd10: /\b([A-Z]\d{2}(?:\.\d{1,2})?)\b/g,
-    // Medication patterns
-    medication: /(?:Medication|Rx|Prescribed):\s*(.+?)(?=\n|$)/gi,
-    dosagePattern: /(\d+(?:\.\d+)?)\s*(mg|mcg|g|ml|units?)/gi,
-    // Lab result patterns
-    labResult: /([A-Za-z\s]+?):\s*(\d+(?:\.\d+)?)\s*([a-zA-Z/%]+)?(?:\s*\((?:Normal|Reference):\s*([0-9\-\.<>]+)\))?/g,
-    // Vital signs patterns
-    bloodPressure: /(?:BP|Blood Pressure):\s*(\d{2,3}\/\d{2,3})/gi,
-    heartRate: /(?:HR|Heart Rate|Pulse):\s*(\d{2,3})\s*(?:bpm|beats?\/min)?/gi,
-    temperature: /(?:Temp|Temperature):\s*(\d{2,3}(?:\.\d)?)\s*°?[FC]/gi,
-    respiratoryRate: /(?:RR|Resp(?:iratory)? Rate):\s*(\d{1,2})\s*(?:breaths?\/min)?/gi,
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
 };
-async function extractMedicalEntities(text, includeConfidence = true) {
-    const entities = {
-        patientInfo: {},
-        diagnoses: [],
-        medications: [],
-        labResults: [],
-        vitalSigns: []
-    };
-    // Extract patient information
-    const nameMatch = PATTERNS.patientName.exec(text);
-    if (nameMatch)
-        entities.patientInfo.name = nameMatch[1];
-    const dobMatch = PATTERNS.dob.exec(text);
-    if (dobMatch)
-        entities.patientInfo.dob = dobMatch[1];
-    const mrnMatch = PATTERNS.mrn.exec(text);
-    if (mrnMatch)
-        entities.patientInfo.mrn = mrnMatch[1];
-    const ageMatch = PATTERNS.age.exec(text);
-    if (ageMatch)
-        entities.patientInfo.age = ageMatch[1];
-    // Extract diagnoses
-    const diagnosisMatches = text.matchAll(PATTERNS.diagnosis);
-    for (const match of diagnosisMatches) {
-        const diagnosisText = match[1].trim();
-        const conditions = diagnosisText.split(/[,;]/).map(c => c.trim());
-        for (const condition of conditions) {
-            if (condition.length > 5) { // Filter out very short matches
-                const diagnosis = {
-                    condition,
-                    confidence: includeConfidence ? 0.85 : undefined
-                };
-                // Check for ICD-10 codes
-                const icdMatch = PATTERNS.icd10.exec(condition);
-                if (icdMatch) {
-                    diagnosis.icd10 = icdMatch[1];
-                    diagnosis.confidence = includeConfidence ? 0.95 : undefined;
-                }
-                // Determine severity based on keywords
-                if (/acute|severe|critical/i.test(condition)) {
-                    diagnosis.severity = 'acute';
-                }
-                else if (/chronic|persistent|long-term/i.test(condition)) {
-                    diagnosis.severity = 'chronic';
-                }
-                entities.diagnoses.push(diagnosis);
-            }
-        }
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.MedicalNERService = void 0;
+const compromise_1 = __importDefault(require("compromise"));
+class MedicalNERService {
+    medicalTerms;
+    drugPatterns;
+    conditionPatterns;
+    procedurePatterns;
+    constructor() {
+        this.medicalTerms = new Map();
+        this.drugPatterns = [];
+        this.conditionPatterns = [];
+        this.procedurePatterns = [];
+        this.initializeMedicalTerms();
+        this.initializePatterns();
     }
-    // Extract medications (continued)
-    const medMatches = text.matchAll(PATTERNS.medication);
-    for (const match of medMatches) {
-        const medText = match[1].trim();
-        const medications = medText.split(/[,;]/).map(m => m.trim());
-        for (const med of medications) {
-            if (med.length > 3) {
-                const medication = {
-                    name: med.split(/\s+/)[0], // First word is usually the drug name
-                    confidence: includeConfidence ? 0.8 : undefined
-                };
-                // Extract dosage
-                const dosageMatch = PATTERNS.dosagePattern.exec(med);
-                if (dosageMatch) {
-                    medication.dosage = `${dosageMatch[1]} ${dosageMatch[2]}`;
-                    medication.confidence = includeConfidence ? 0.9 : undefined;
-                }
-                // Extract frequency
-                if (/daily|once a day|qd/i.test(med)) {
-                    medication.frequency = 'daily';
-                }
-                else if (/twice a day|bid|b\.i\.d\./i.test(med)) {
-                    medication.frequency = 'twice daily';
-                }
-                else if (/three times|tid|t\.i\.d\./i.test(med)) {
-                    medication.frequency = 'three times daily';
-                }
-                else if (/four times|qid|q\.i\.d\./i.test(med)) {
-                    medication.frequency = 'four times daily';
-                }
-                // Extract route
-                if (/\boral|PO|by mouth\b/i.test(med)) {
-                    medication.route = 'oral';
-                }
-                else if (/\bIV|intravenous\b/i.test(med)) {
-                    medication.route = 'IV';
-                }
-                else if (/\bIM|intramuscular\b/i.test(med)) {
-                    medication.route = 'IM';
-                }
-                entities.medications.push(medication);
-            }
-        }
-    }
-    // Extract lab results
-    const labMatches = text.matchAll(PATTERNS.labResult);
-    for (const match of labMatches) {
-        const [_, testName, value, unit, normalRange] = match;
-        const labResult = {
-            testName: testName.trim(),
-            value: value.trim(),
-            unit: unit?.trim() || '',
-            normalRange: normalRange?.trim(),
-            abnormal: false,
-            confidence: includeConfidence ? 0.85 : undefined
+    initializeMedicalTerms() {
+        // Common medical terms and their categories
+        const terms = {
+            // Medications
+            'aspirin': 'MEDICATION',
+            'ibuprofen': 'MEDICATION',
+            'acetaminophen': 'MEDICATION',
+            'metformin': 'MEDICATION',
+            'lisinopril': 'MEDICATION',
+            'atorvastatin': 'MEDICATION',
+            'amlodipine': 'MEDICATION',
+            'omeprazole': 'MEDICATION',
+            'levothyroxine': 'MEDICATION',
+            'albuterol': 'MEDICATION',
+            // Conditions
+            'diabetes': 'CONDITION',
+            'hypertension': 'CONDITION',
+            'pneumonia': 'CONDITION',
+            'asthma': 'CONDITION',
+            'depression': 'CONDITION',
+            'anxiety': 'CONDITION',
+            'arthritis': 'CONDITION',
+            'cancer': 'CONDITION',
+            'heart disease': 'CONDITION',
+            'stroke': 'CONDITION',
+            // Procedures
+            'surgery': 'PROCEDURE',
+            'biopsy': 'PROCEDURE',
+            'endoscopy': 'PROCEDURE',
+            'colonoscopy': 'PROCEDURE',
+            'mri': 'PROCEDURE',
+            'ct scan': 'PROCEDURE',
+            'x-ray': 'PROCEDURE',
+            'ultrasound': 'PROCEDURE',
+            'ecg': 'PROCEDURE',
+            'ekg': 'PROCEDURE',
+            // Anatomy
+            'heart': 'ANATOMY',
+            'lung': 'ANATOMY',
+            'liver': 'ANATOMY',
+            'kidney': 'ANATOMY',
+            'brain': 'ANATOMY',
+            'stomach': 'ANATOMY',
+            'chest': 'ANATOMY',
+            'abdomen': 'ANATOMY',
+            'head': 'ANATOMY',
+            'neck': 'ANATOMY',
+            // Symptoms
+            'pain': 'SYMPTOM',
+            'fever': 'SYMPTOM',
+            'cough': 'SYMPTOM',
+            'nausea': 'SYMPTOM',
+            'fatigue': 'SYMPTOM',
+            'headache': 'SYMPTOM',
+            'dizziness': 'SYMPTOM',
+            'shortness of breath': 'SYMPTOM',
+            'chest pain': 'SYMPTOM',
+            'abdominal pain': 'SYMPTOM'
         };
-        // Check if abnormal based on common indicators
-        if (normalRange) {
-            const numValue = parseFloat(value);
-            if (normalRange.includes('-')) {
-                const [min, max] = normalRange.split('-').map(n => parseFloat(n));
-                labResult.abnormal = numValue < min || numValue > max;
+        for (const [term, category] of Object.entries(terms)) {
+            this.medicalTerms.set(term.toLowerCase(), category);
+        }
+    }
+    initializePatterns() {
+        // Medication patterns
+        this.drugPatterns = [
+            /\b\w+cillin\b/gi, // Antibiotics ending in -cillin
+            /\b\w+statin\b/gi, // Statins
+            /\b\w+pril\b/gi, // ACE inhibitors
+            /\b\w+sartan\b/gi, // ARBs
+            /\b\w+olol\b/gi, // Beta blockers
+            /\b\w+pine\b/gi, // Calcium channel blockers
+            /\b\w+zole\b/gi, // Proton pump inhibitors
+        ];
+        // Condition patterns
+        this.conditionPatterns = [
+            /\b\w+itis\b/gi, // Inflammatory conditions
+            /\b\w+osis\b/gi, // Disease conditions
+            /\b\w+emia\b/gi, // Blood conditions
+            /\b\w+pathy\b/gi, // Disease of organs
+        ];
+        // Procedure patterns
+        this.procedurePatterns = [
+            /\b\w+scopy\b/gi, // Scope procedures
+            /\b\w+ectomy\b/gi, // Surgical removals
+            /\b\w+plasty\b/gi, // Surgical repairs
+            /\b\w+tomy\b/gi, // Surgical incisions
+        ];
+    }
+    async extractEntities(text) {
+        try {
+            const entities = [];
+            const processedText = text.toLowerCase();
+            // Extract entities using different methods
+            const termEntities = this.extractByTerms(text);
+            const patternEntities = this.extractByPatterns(text);
+            const nlpEntities = this.extractByNLP(text);
+            // Combine and deduplicate entities
+            entities.push(...termEntities, ...patternEntities, ...nlpEntities);
+            const uniqueEntities = this.deduplicateEntities(entities);
+            // Calculate overall confidence
+            const confidence = uniqueEntities.length > 0
+                ? uniqueEntities.reduce((sum, entity) => sum + entity.confidence, 0) / uniqueEntities.length
+                : 0;
+            return {
+                entities: uniqueEntities,
+                processedText: text,
+                confidence
+            };
+        }
+        catch (error) {
+            console.error('Failed to extract medical entities:', error);
+            throw error;
+        }
+    }
+    extractByTerms(text) {
+        const entities = [];
+        const lowerText = text.toLowerCase();
+        for (const [term, label] of this.medicalTerms.entries()) {
+            const regex = new RegExp(`\\b${term}\\b`, 'gi');
+            let match;
+            while ((match = regex.exec(text)) !== null) {
+                entities.push({
+                    text: match[0],
+                    label,
+                    confidence: 0.9,
+                    start: match.index,
+                    end: match.index + match[0].length,
+                    context: this.getContext(text, match.index, match[0].length)
+                });
             }
         }
-        // Also check for explicit abnormal indicators
-        const surroundingText = text.substring(match.index - 20, match.index + match[0].length + 20);
-        if (/\b(high|elevated|low|decreased|abnormal)\b/i.test(surroundingText)) {
-            labResult.abnormal = true;
+        return entities;
+    }
+    extractByPatterns(text) {
+        const entities = [];
+        // Check medication patterns
+        for (const pattern of this.drugPatterns) {
+            let match;
+            while ((match = pattern.exec(text)) !== null) {
+                entities.push({
+                    text: match[0],
+                    label: 'MEDICATION',
+                    confidence: 0.7,
+                    start: match.index,
+                    end: match.index + match[0].length,
+                    context: this.getContext(text, match.index, match[0].length)
+                });
+            }
         }
-        entities.labResults.push(labResult);
+        // Check condition patterns
+        for (const pattern of this.conditionPatterns) {
+            let match;
+            while ((match = pattern.exec(text)) !== null) {
+                entities.push({
+                    text: match[0],
+                    label: 'CONDITION',
+                    confidence: 0.6,
+                    start: match.index,
+                    end: match.index + match[0].length,
+                    context: this.getContext(text, match.index, match[0].length)
+                });
+            }
+        }
+        // Check procedure patterns
+        for (const pattern of this.procedurePatterns) {
+            let match;
+            while ((match = pattern.exec(text)) !== null) {
+                entities.push({
+                    text: match[0],
+                    label: 'PROCEDURE',
+                    confidence: 0.6,
+                    start: match.index,
+                    end: match.index + match[0].length,
+                    context: this.getContext(text, match.index, match[0].length)
+                });
+            }
+        }
+        return entities;
     }
-    // Extract vital signs
-    // Blood Pressure
-    const bpMatches = text.matchAll(PATTERNS.bloodPressure);
-    for (const match of bpMatches) {
-        entities.vitalSigns.push({
-            type: 'Blood Pressure',
-            value: match[1],
-            unit: 'mmHg'
+    extractByNLP(text) {
+        const entities = [];
+        try {
+            const doc = (0, compromise_1.default)(text);
+            // Extract people (could be doctors, patients)
+            const people = doc.people().out('array');
+            people.forEach((person) => {
+                const index = text.toLowerCase().indexOf(person.toLowerCase());
+                if (index !== -1) {
+                    entities.push({
+                        text: person,
+                        label: 'PERSON',
+                        confidence: 0.8,
+                        start: index,
+                        end: index + person.length,
+                        context: this.getContext(text, index, person.length)
+                    });
+                }
+            });
+            // Extract numbers (could be dosages, measurements)
+            const numbers = doc.numbers().out('array');
+            numbers.forEach((number) => {
+                const index = text.toLowerCase().indexOf(number.toLowerCase());
+                if (index !== -1 && this.isMedicalMeasurement(text, index)) {
+                    entities.push({
+                        text: number,
+                        label: 'MEASUREMENT',
+                        confidence: 0.7,
+                        start: index,
+                        end: index + number.length,
+                        context: this.getContext(text, index, number.length)
+                    });
+                }
+            });
+        }
+        catch (error) {
+            console.warn('NLP processing failed:', error);
+        }
+        return entities;
+    }
+    getContext(text, start, length) {
+        const contextStart = Math.max(0, start - 50);
+        const contextEnd = Math.min(text.length, start + length + 50);
+        return text.substring(contextStart, contextEnd);
+    }
+    isMedicalMeasurement(text, numberIndex) {
+        const context = this.getContext(text, numberIndex, 10);
+        const medicalUnits = ['mg', 'ml', 'cc', 'units', 'mcg', 'g', 'kg', 'lbs', 'mmHg', 'bpm'];
+        return medicalUnits.some(unit => context.toLowerCase().includes(unit));
+    }
+    deduplicateEntities(entities) {
+        const unique = new Map();
+        entities.forEach(entity => {
+            const key = `${entity.text.toLowerCase()}-${entity.start}-${entity.end}`;
+            const existing = unique.get(key);
+            if (!existing || entity.confidence > existing.confidence) {
+                unique.set(key, entity);
+            }
         });
+        return Array.from(unique.values()).sort((a, b) => a.start - b.start);
     }
-    // Heart Rate
-    const hrMatches = text.matchAll(PATTERNS.heartRate);
-    for (const match of hrMatches) {
-        entities.vitalSigns.push({
-            type: 'Heart Rate',
-            value: match[1],
-            unit: 'bpm'
+    async extractMedicalEntitiesFromDocument(title, content) {
+        try {
+            const fullText = `${title}\n\n${content}`;
+            const result = await this.extractEntities(fullText);
+            return result.entities;
+        }
+        catch (error) {
+            console.error('Failed to extract entities from document:', error);
+            throw error;
+        }
+    }
+    getEntityTypes() {
+        return [
+            'MEDICATION',
+            'CONDITION',
+            'PROCEDURE',
+            'ANATOMY',
+            'SYMPTOM',
+            'PERSON',
+            'DATE',
+            'MEASUREMENT'
+        ];
+    }
+    filterEntitiesByType(entities, type) {
+        return entities.filter(entity => entity.label === type);
+    }
+    getEntityStatistics(entities) {
+        const stats = {};
+        entities.forEach(entity => {
+            stats[entity.label] = (stats[entity.label] || 0) + 1;
         });
+        return stats;
     }
-    // Temperature
-    const tempMatches = text.matchAll(PATTERNS.temperature);
-    for (const match of tempMatches) {
-        entities.vitalSigns.push({
-            type: 'Temperature',
-            value: match[1],
-            unit: match[0].includes('F') ? '°F' : '°C'
-        });
-    }
-    // Respiratory Rate
-    const rrMatches = text.matchAll(PATTERNS.respiratoryRate);
-    for (const match of rrMatches) {
-        entities.vitalSigns.push({
-            type: 'Respiratory Rate',
-            value: match[1],
-            unit: 'breaths/min'
-        });
-    }
-    return entities;
 }
+exports.MedicalNERService = MedicalNERService;
 //# sourceMappingURL=medical-ner-service.js.map

@@ -33,7 +33,7 @@ export interface SearchResult {
 
 export class MongoDBClient {
   private client: MongoClient;
-  private db: Db;
+  public db: Db; // Make db public for access in tools
   private documentsCollection: Collection<MedicalDocument>;
   private entitiesCollection: Collection<MedicalEntity>;
 
@@ -71,10 +71,15 @@ export class MongoDBClient {
       });
 
       // Vector search index (for Atlas Vector Search)
-      await this.documentsCollection.createIndex(
-        { embedding: "2dsphere" },
-        { name: "vector_index", background: true }
-      );
+      try {
+        await this.documentsCollection.createIndex(
+          { embedding: "2dsphere" },
+          { name: "vector_index", background: true }
+        );
+      } catch (error) {
+        // Vector index creation might fail if not supported
+        console.warn('Could not create vector index (normal for non-Atlas deployments)');
+      }
 
       // Medical entity indexes
       await this.documentsCollection.createIndex({ 'medicalEntities.label': 1 });
@@ -256,4 +261,3 @@ export class MongoDBClient {
     }
   }
 }
-

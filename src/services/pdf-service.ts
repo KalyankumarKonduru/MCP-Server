@@ -1,6 +1,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import * as pdfParse from 'pdf-parse';
+import pdfParse from 'pdf-parse'; // Fixed import
 
 export interface PDFParseResult {
   text: string;
@@ -372,4 +372,3 @@ export class PDFService {
     }
   }
 }
-

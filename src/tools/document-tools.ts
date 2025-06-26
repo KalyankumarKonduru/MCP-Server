@@ -1,6 +1,6 @@
 import { Tool } from '@modelcontextprotocol/sdk/types.js';
 import { MongoDBClient, MedicalDocument } from '../db/mongodb-client.js';
-import { EmbeddingService } from '../services/embedding-service.js';
+import { LocalEmbeddingService } from '../services/local-embedding-service.js';
 import { MedicalNERService } from '../services/medical-ner-service.js';
 import { OCRService } from '../services/ocr-service.js';
 import { PDFService } from '../services/pdf-service.js';
@@ -50,7 +50,7 @@ export interface ListDocumentsRequest {
 export class DocumentTools {
   constructor(
     private mongoClient: MongoDBClient,
-    private embeddingService: EmbeddingService,
+    private embeddingService: LocalEmbeddingService,
     private nerService: MedicalNERService,
     private ocrService: OCRService,
     private pdfService: PDFService
@@ -129,9 +129,10 @@ export class DocumentTools {
       }
 
       // Extract medical entities
-      const medicalEntities = await this.nerService.extractMedicalEntitiesFromDocument(args.title, extractedText);
+      const medicalEntitiesResult = await this.nerService.extractEntities(extractedText);
+      const medicalEntities = medicalEntitiesResult.entities;
 
-      // Generate embedding
+      // Generate embedding using local service
       const embedding = await this.embeddingService.generateMedicalDocumentEmbedding(
         args.title,
         extractedText,
@@ -246,7 +247,7 @@ export class DocumentTools {
 
   async handleSearchDocuments(args: SearchDocumentsRequest): Promise<any> {
     try {
-      // Generate query embedding
+      // Generate query embedding using local service
       const queryEmbedding = await this.embeddingService.generateQueryEmbedding(args.query);
 
       // Build MongoDB filter
@@ -514,4 +515,3 @@ export class DocumentTools {
     ];
   }
 }
-
