@@ -1,3 +1,5 @@
+MERMAID DIAGRAM: -
+
 ```mermaid
 graph TB
     subgraph "MCP Server (mcp-server)"
