@@ -1,3 +1,4 @@
+```mermaid
 graph TB
     subgraph "MCP Server (mcp-server)"
         subgraph "MCP Protocol Layer"
@@ -31,12 +32,12 @@ graph TB
     Transport -->|MCP Messages| Protocol
     Protocol -->|"tools/list"| Registry
     Protocol -->|"tools/call"| Registry
-    
+
     %% Tool Registration
     Registry --> DocTools
     Registry --> MedTools
     Registry --> EmbedTools
-    
+
     %% Tool Implementation
     DocTools --> PDF
     DocTools --> OCR
@@ -45,7 +46,7 @@ graph TB
     MedTools --> NER
     MedTools --> Embed
     EmbedTools --> Embed
-    
+
     %% Storage
     DocTools --> Mongo
     MedTools --> Mongo
