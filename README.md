@@ -1,4 +1,4 @@
-MERMAID DIAGRAM: -
+**MERMAID DIAGRAM: -**
 
 ```mermaid
 graph TB
