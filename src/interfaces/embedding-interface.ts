@@ -1,5 +1,3 @@
-// src/interfaces/embedding-interface.ts
-
 export interface EmbeddingServiceInterface {
     generateEmbedding(text: string): Promise<number[]>;
     generateEmbeddings(texts: string[]): Promise<number[][]>;
@@ -16,4 +14,4 @@ export interface EmbeddingServiceInterface {
       threshold?: number
     ): Promise<Array<{id: string, similarity: number}>>;
     getModelInfo(): { model: string, dimensions: number };
-  }
+}

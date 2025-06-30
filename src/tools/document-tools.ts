@@ -1,6 +1,7 @@
+// src/tools/document-tools.ts
 import { Tool } from '@modelcontextprotocol/sdk/types.js';
 import { MongoDBClient, MedicalDocument } from '../db/mongodb-client.js';
-import { LocalEmbeddingService } from '../services/local-embedding-service.js';
+import { GoogleEmbeddingService } from '../services/google-embedding-service.js';
 import { MedicalNERService } from '../services/medical-ner-service.js';
 import { OCRService } from '../services/ocr-service.js';
 import { PDFService } from '../services/pdf-service.js';
@@ -25,6 +26,9 @@ export interface SearchDocumentsRequest {
   query: string;
   limit?: number;
   threshold?: number;
+  searchType?: 'vector' | 'text' | 'hybrid';
+  vectorWeight?: number;
+  textWeight?: number;
   filter?: {
     documentType?: string;
     patientId?: string;
@@ -50,7 +54,7 @@ export interface ListDocumentsRequest {
 export class DocumentTools {
   constructor(
     private mongoClient: MongoDBClient,
-    private embeddingService: LocalEmbeddingService,
+    private embeddingService: GoogleEmbeddingService,
     private nerService: MedicalNERService,
     private ocrService: OCRService,
     private pdfService: PDFService
@@ -59,7 +63,7 @@ export class DocumentTools {
   createUploadDocumentTool(): Tool {
     return {
       name: 'uploadDocument',
-      description: 'Upload and process a medical document with automatic text extraction, NER, and embedding generation',
+      description: 'Upload and process a medical document with automatic text extraction, NER, and Google Gemini embedding generation',
       inputSchema: {
         type: 'object',
         properties: {
@@ -132,7 +136,7 @@ export class DocumentTools {
       const medicalEntitiesResult = await this.nerService.extractEntities(extractedText);
       const medicalEntities = medicalEntitiesResult.entities;
 
-      // Generate embedding using local service
+      // Generate embedding using Google Gemini
       const embedding = await this.embeddingService.generateMedicalDocumentEmbedding(
         args.title,
         extractedText,
@@ -167,6 +171,7 @@ export class DocumentTools {
                 textLength: extractedText.length,
                 entitiesFound: medicalEntities.length,
                 embeddingDimensions: embedding.length,
+                embeddingModel: 'gemini-embedding-exp-03-07',
                 ...processingResults
               },
               medicalEntities: medicalEntities.slice(0, 10) // Show first 10 entities
@@ -194,7 +199,7 @@ export class DocumentTools {
   createSearchDocumentsTool(): Tool {
     return {
       name: 'searchDocuments',
-      description: 'Search medical documents using semantic similarity and filters',
+      description: 'Search medical documents using Google Gemini semantic similarity, text search, or hybrid approach with filters',
       inputSchema: {
         type: 'object',
         properties: {
@@ -211,6 +216,23 @@ export class DocumentTools {
           threshold: {
             type: 'number',
             description: 'Minimum similarity score (default: 0.7)',
+            minimum: 0,
+            maximum: 1
+          },
+          searchType: {
+            type: 'string',
+            enum: ['vector', 'text', 'hybrid'],
+            description: 'Type of search to perform (default: hybrid)'
+          },
+          vectorWeight: {
+            type: 'number',
+            description: 'Weight for vector search in hybrid mode (default: 0.7)',
+            minimum: 0,
+            maximum: 1
+          },
+          textWeight: {
+            type: 'number',
+            description: 'Weight for text search in hybrid mode (default: 0.3)',
             minimum: 0,
             maximum: 1
           },
@@ -247,8 +269,9 @@ export class DocumentTools {
 
   async handleSearchDocuments(args: SearchDocumentsRequest): Promise<any> {
     try {
-      // Generate query embedding using local service
-      const queryEmbedding = await this.embeddingService.generateQueryEmbedding(args.query);
+      const searchType = args.searchType || 'hybrid';
+      const limit = args.limit || 10;
+      const threshold = args.threshold || 0.7;
 
       // Build MongoDB filter
       const mongoFilter: Record<string, any> = {};
@@ -272,13 +295,43 @@ export class DocumentTools {
         };
       }
 
-      // Perform vector search
-      const searchResults = await this.mongoClient.vectorSearch(
-        queryEmbedding,
-        args.limit || 10,
-        args.threshold || 0.7,
-        mongoFilter
-      );
+      let searchResults;
+
+      switch (searchType) {
+        case 'vector':
+          // Pure vector search using Google Gemini embeddings
+          const queryEmbedding = await this.embeddingService.generateQueryEmbedding(args.query);
+          searchResults = await this.mongoClient.vectorSearch(
+            queryEmbedding,
+            limit,
+            threshold,
+            mongoFilter
+          );
+          break;
+
+        case 'text':
+          // Pure text search
+          searchResults = await this.mongoClient.textSearch(
+            args.query,
+            limit,
+            mongoFilter
+          );
+          break;
+
+        case 'hybrid':
+        default:
+          // Hybrid search combining vector and text
+          const hybridQueryEmbedding = await this.embeddingService.generateQueryEmbedding(args.query);
+          searchResults = await this.mongoClient.hybridSearch(
+            args.query,
+            hybridQueryEmbedding,
+            limit,
+            args.vectorWeight || 0.7,
+            args.textWeight || 0.3,
+            mongoFilter
+          );
+          break;
+      }
 
       // Format results
       const formattedResults = searchResults.map(result => ({
@@ -297,11 +350,15 @@ export class DocumentTools {
             text: JSON.stringify({
               success: true,
               query: args.query,
+              searchType,
+              embeddingModel: 'gemini-embedding-exp-03-07',
               resultsCount: searchResults.length,
               results: formattedResults,
               searchParameters: {
-                limit: args.limit || 10,
-                threshold: args.threshold || 0.7,
+                limit,
+                threshold,
+                vectorWeight: args.vectorWeight || 0.7,
+                textWeight: args.textWeight || 0.3,
                 filter: args.filter || {}
               }
             }, null, 2)
@@ -406,7 +463,8 @@ export class DocumentTools {
         content: doc.content.substring(0, 200) + (doc.content.length > 200 ? '...' : ''),
         metadata: doc.metadata,
         entityCount: doc.medicalEntities?.length || 0,
-        hasEmbedding: !!doc.embedding
+        hasEmbedding: !!doc.embedding,
+        embeddingModel: doc.embedding ? 'gemini-embedding-exp-03-07' : null
       }));
 
       return {
@@ -416,6 +474,7 @@ export class DocumentTools {
             text: JSON.stringify({
               success: true,
               documents: formattedDocuments,
+              embeddingModel: 'gemini-embedding-exp-03-07',
               pagination: {
                 limit,
                 offset,

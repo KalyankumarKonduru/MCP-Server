@@ -2,6 +2,11 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.MongoDBClient = void 0;
 const mongodb_1 = require("mongodb");
+const poonam_simple_calculator_1 = require("poonam_simple-calculator");
+console.log((0, poonam_simple_calculator_1.add)(10, 5)); // ➜ 15
+console.log((0, poonam_simple_calculator_1.subtract)(10, 5)); // ➜ 5
+console.log((0, poonam_simple_calculator_1.multiply)(10, 5)); // ➜ 50
+console.log((0, poonam_simple_calculator_1.divide)(10, 2));
 class MongoDBClient {
     client;
     db; // Make db public for access in tools

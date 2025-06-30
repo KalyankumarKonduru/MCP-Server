@@ -1,3 +1,4 @@
+// src/server.ts
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import {
@@ -7,13 +8,13 @@ import {
 import dotenv from 'dotenv';
 
 import { MongoDBClient } from './db/mongodb-client.js';
-import { LocalEmbeddingService } from './services/local-embedding-service.js';
+import { GoogleEmbeddingService } from './services/google-embedding-service.ts';
 import { MedicalNERService } from './services/medical-ner-service.js';
 import { OCRService } from './services/ocr-service.js';
 import { PDFService } from './services/pdf-service.js';
 import { DocumentTools } from './tools/document-tools.js';
 import { MedicalTools } from './tools/medical-tools.js';
-import { LocalEmbeddingTools } from './tools/local-embedding-tools.js';
+import { GoogleEmbeddingTools } from './tools/google-embedding-tools.ts';
 
 // Load environment variables
 dotenv.config();
@@ -44,26 +45,31 @@ const logger = {
 export class MedicalMCPServer {
   private server: Server;
   private mongoClient: MongoDBClient;
-  private localEmbeddingService: LocalEmbeddingService;
+  private googleEmbeddingService: GoogleEmbeddingService;
   private nerService: MedicalNERService;
   private ocrService: OCRService;
   private pdfService: PDFService;
   private documentTools: DocumentTools;
   private medicalTools: MedicalTools;
-  private localEmbeddingTools: LocalEmbeddingTools;
+  private googleEmbeddingTools: GoogleEmbeddingTools;
 
   constructor() {
     // Validate required environment variables
     const mongoConnectionString = process.env.MONGODB_CONNECTION_STRING;
-    const dbName = process.env.MONGODB_DATABASE_NAME || 'medical_documents';
+    const dbName = process.env.MONGODB_DATABASE_NAME || 'MCP';
+    const googleApiKey = process.env.GOOGLE_AI_API_KEY;
 
     if (!mongoConnectionString) {
       throw new Error('MONGODB_CONNECTION_STRING environment variable is required');
     }
 
+    if (!googleApiKey) {
+      throw new Error('GOOGLE_AI_API_KEY environment variable is required');
+    }
+
     // Initialize services
     this.mongoClient = new MongoDBClient(mongoConnectionString, dbName);
-    this.localEmbeddingService = new LocalEmbeddingService(); // Using local HuggingFace model
+    this.googleEmbeddingService = new GoogleEmbeddingService(googleApiKey);
     this.nerService = new MedicalNERService();
     this.ocrService = new OCRService();
     this.pdfService = new PDFService();
@@ -71,7 +77,7 @@ export class MedicalMCPServer {
     // Initialize tools
     this.documentTools = new DocumentTools(
       this.mongoClient,
-      this.localEmbeddingService, // Using local embedding service instead of OpenAI
+      this.googleEmbeddingService,
       this.nerService,
       this.ocrService,
       this.pdfService
@@ -80,18 +86,18 @@ export class MedicalMCPServer {
     this.medicalTools = new MedicalTools(
       this.mongoClient,
       this.nerService,
-      this.localEmbeddingService // Using local embedding service
+      this.googleEmbeddingService
     );
 
-    // Initialize local embedding tools
-    this.localEmbeddingTools = new LocalEmbeddingTools(this.mongoClient);
+    // Initialize Google embedding tools
+    this.googleEmbeddingTools = new GoogleEmbeddingTools(this.mongoClient, this.googleEmbeddingService);
 
     // Initialize MCP server
     this.server = new Server(
       {
         name: 'medical-mcp-server',
         version: '1.0.0',
-        description: 'Medical MCP Server with local embeddings, document processing, NER, and vector search capabilities'
+        description: 'Medical MCP Server with Google Gemini embeddings, document processing, NER, and vector search capabilities'
       },
       {
         capabilities: {
@@ -108,13 +114,13 @@ export class MedicalMCPServer {
     this.server.setRequestHandler(ListToolsRequestSchema, async () => {
       const documentToolsList = this.documentTools.getAllTools();
       const medicalToolsList = this.medicalTools.getAllTools();
-      const localEmbeddingToolsList = this.localEmbeddingTools.getAllTools();
+      const googleEmbeddingToolsList = this.googleEmbeddingTools.getAllTools();
       
       return {
         tools: [
           ...documentToolsList,
           ...medicalToolsList,
-          ...localEmbeddingToolsList
+          ...googleEmbeddingToolsList
         ],
       };
     });
@@ -152,15 +158,18 @@ export class MedicalMCPServer {
           case 'getMedicalInsights':
             return await this.medicalTools.handleMedicalInsights(args as any || {});
 
-          // Local embedding tools
-          case 'generateEmbeddingLocal':
-            return await this.localEmbeddingTools.handleGenerateEmbedding(args as any || {});
+          // Google embedding tools
+          case 'generateEmbeddingGoogle':
+            return await this.googleEmbeddingTools.handleGenerateEmbedding(args as any || {});
 
           case 'chunkAndEmbedDocument':
-            return await this.localEmbeddingTools.handleChunkAndEmbed(args as any || {});
+            return await this.googleEmbeddingTools.handleChunkAndEmbed(args as any || {});
 
-          case 'semanticSearchLocal':
-            return await this.localEmbeddingTools.handleSemanticSearch(args as any || {});
+          case 'semanticSearchGoogle':
+            return await this.googleEmbeddingTools.handleSemanticSearch(args as any || {});
+
+          case 'hybridSearch':
+            return await this.googleEmbeddingTools.handleHybridSearch(args as any || {});
 
           // Legacy tool names for backward compatibility
           case 'upload_document':
@@ -226,13 +235,15 @@ export class MedicalMCPServer {
         case 'getMedicalInsights':
           return await this.medicalTools.handleMedicalInsights(args as any || {});
 
-        // Local embedding tools
-        case 'generateEmbeddingLocal':
-          return await this.localEmbeddingTools.handleGenerateEmbedding(args as any || {});
+        // Google embedding tools
+        case 'generateEmbeddingGoogle':
+          return await this.googleEmbeddingTools.handleGenerateEmbedding(args as any || {});
         case 'chunkAndEmbedDocument':
-          return await this.localEmbeddingTools.handleChunkAndEmbed(args as any || {});
-        case 'semanticSearchLocal':
-          return await this.localEmbeddingTools.handleSemanticSearch(args as any || {});
+          return await this.googleEmbeddingTools.handleChunkAndEmbed(args as any || {});
+        case 'semanticSearchGoogle':
+          return await this.googleEmbeddingTools.handleSemanticSearch(args as any || {});
+        case 'hybridSearch':
+          return await this.googleEmbeddingTools.handleHybridSearch(args as any || {});
 
         default:
           throw new Error(`Unknown tool: ${name}`);
@@ -289,7 +300,7 @@ export class MedicalMCPServer {
   }
 
   private async handleSemanticSearch(args: any): Promise<any> {
-    return await this.localEmbeddingTools.handleSemanticSearch({
+    return await this.googleEmbeddingTools.handleSemanticSearch({
       query: args.query,
       filter: args.patientId ? { patientId: args.patientId } : undefined,
       topK: args.limit || 5
@@ -306,12 +317,12 @@ export class MedicalMCPServer {
   async start(): Promise<void> {
     try {
       if (isHttpMode) {
-        logger.log('🏥 Medical MCP Server v1.0.0 (HTTP Mode)');
+        logger.log('🏥 Medical MCP Server v1.0.0 (HTTP Mode with Google Gemini Embeddings)');
         logger.log('==========================================');
       } else if (isStdioMode) {
         logger.error('Starting Medical MCP Server in stdio mode...');
       } else {
-        logger.log('🏥 Medical MCP Server v1.0.0');
+        logger.log('🏥 Medical MCP Server v1.0.0 (Google Gemini Embeddings)');
         logger.log('=====================================');
         logger.log('Starting Medical MCP Server...');
       }
@@ -324,12 +335,12 @@ export class MedicalMCPServer {
         logger.log('✓ MongoDB connection established');
       }
 
-      // Initialize local embedding service
-      await this.localEmbeddingService.initialize();
+      // Initialize Google embedding service
+      await this.googleEmbeddingService.initialize();
       if (isStdioMode) {
-        logger.error('Local embedding service initialized successfully');
+        logger.error('Google Embedding service initialized successfully');
       } else {
-        logger.log('✓ Local embedding service initialized (HuggingFace Transformers)');
+        logger.log('✓ Google Embedding service initialized (Gemini)');
       }
 
       // Initialize OCR service
@@ -356,6 +367,7 @@ export class MedicalMCPServer {
             status: 'healthy',
             server: 'medical-mcp-server',
             version: '1.0.0',
+            embeddingService: 'Google Gemini',
             timestamp: new Date().toISOString()
           });
         });
@@ -397,13 +409,13 @@ export class MedicalMCPServer {
               const listResult = await this.server.setRequestHandler(ListToolsRequestSchema, async () => {
                 const documentTools = this.documentTools.getAllTools();
                 const medicalTools = this.medicalTools.getAllTools();
-                const localEmbeddingTools = this.localEmbeddingTools.getAllTools();
+                const googleEmbeddingTools = this.googleEmbeddingTools.getAllTools();
                 
                 return {
                   tools: [
                     ...documentTools,
                     ...medicalTools,
-                    ...localEmbeddingTools
+                    ...googleEmbeddingTools
                   ],
                 };
               });
@@ -414,7 +426,7 @@ export class MedicalMCPServer {
                   tools: [
                     ...this.documentTools.getAllTools(),
                     ...this.medicalTools.getAllTools(),
-                    ...this.localEmbeddingTools.getAllTools()
+                    ...this.googleEmbeddingTools.getAllTools()
                   ]
                 },
                 id: request.id
@@ -488,7 +500,7 @@ export class MedicalMCPServer {
       const stats = await this.getStatistics();
       logger.log(`📄 Documents in database: ${stats.documentsCount}`);
       logger.log(`🔧 Tools available: ${stats.toolsAvailable}`);
-      logger.log(`🤖 Embedding model: ${stats.embeddingModel} (Local)`);
+      logger.log(`🤖 Embedding model: ${stats.embeddingModel} (Google Gemini)`);
       logger.log(`⏱️  Server uptime: ${Math.round(stats.uptime)}s`);
       
       logger.log('\n📝 Available tools:');
@@ -499,9 +511,10 @@ export class MedicalMCPServer {
       logger.log('   🔗 findSimilarCases - Find similar medical cases');
       logger.log('   📈 analyzePatientHistory - Analyze patient medical history');
       logger.log('   💡 getMedicalInsights - Get medical insights and recommendations');
-      logger.log('   🧠 generateEmbeddingLocal - Generate embeddings locally');
+      logger.log('   🧠 generateEmbeddingGoogle - Generate embeddings with Google Gemini');
       logger.log('   📄 chunkAndEmbedDocument - Chunk and embed large documents');
-      logger.log('   🔍 semanticSearchLocal - Search using local embeddings');
+      logger.log('   🔍 semanticSearchGoogle - Search using Google embeddings');
+      logger.log('   🔄 hybridSearch - Combined vector and text search');
       
       logger.log('\n💬 The server is now listening for MCP client connections...');
     } catch (error) {
@@ -524,7 +537,7 @@ export class MedicalMCPServer {
       // Cleanup services
       await this.mongoClient.disconnect();
       await this.ocrService.terminate();
-      await this.localEmbeddingService.shutdown();
+      await this.googleEmbeddingService.shutdown();
       
       logger.error('✓ All services cleaned up');
     } catch (error) {
@@ -550,8 +563,8 @@ export class MedicalMCPServer {
       allHealthy = false;
     }
 
-    services.localEmbedding = this.localEmbeddingService.isReady();
-    if (!services.localEmbedding) allHealthy = false;
+    services.googleEmbedding = this.googleEmbeddingService.isReady();
+    if (!services.googleEmbedding) allHealthy = false;
 
     services.ner = true; // NER service is always available
     services.ocr = this.ocrService ? true : false;
@@ -575,12 +588,12 @@ export class MedicalMCPServer {
       const documentsCount = await this.mongoClient.countDocuments();
       const documentTools = this.documentTools.getAllTools();
       const medicalTools = this.medicalTools.getAllTools();
-      const localEmbeddingTools = this.localEmbeddingTools.getAllTools();
-      const embeddingModel = this.localEmbeddingService.getModelInfo();
+      const googleEmbeddingTools = this.googleEmbeddingTools.getAllTools();
+      const embeddingModel = this.googleEmbeddingService.getModelInfo();
 
       return {
         documentsCount,
-        toolsAvailable: documentTools.length + medicalTools.length + localEmbeddingTools.length,
+        toolsAvailable: documentTools.length + medicalTools.length + googleEmbeddingTools.length,
         embeddingModel: embeddingModel.model,
         uptime: process.uptime()
       };
