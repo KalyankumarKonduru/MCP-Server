@@ -41,7 +41,7 @@ export class EmbeddingService implements EmbeddingServiceInterface {
   async findSimilarTexts(
     queryEmbedding: number[], 
     candidateEmbeddings: Array<{id: string, embedding: number[]}>,
-    threshold: number = 0.7
+    threshold: number = 0.3
   ): Promise<Array<{id: string, similarity: number}>> {
     throw new Error('EmbeddingService is deprecated. Use LocalEmbeddingService instead.');
   }

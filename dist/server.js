@@ -1,4 +1,5 @@
 "use strict";
+// Update src/server.ts - Just the constructor and imports section
 var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
@@ -31,7 +32,6 @@ const logger = {
             console.log(...args);
         }
         else {
-            // In stdio mode, log to stderr to avoid interfering with JSON-RPC
             console.error(...args);
         }
     },
@@ -52,28 +52,26 @@ class MedicalMCPServer {
     constructor() {
         // Validate required environment variables
         const mongoConnectionString = process.env.MONGODB_CONNECTION_STRING;
-        const dbName = process.env.MONGODB_DATABASE_NAME || 'medical_documents';
+        const dbName = process.env.MONGODB_DATABASE_NAME || 'MCP';
         if (!mongoConnectionString) {
             throw new Error('MONGODB_CONNECTION_STRING environment variable is required');
         }
+        // Note: No Google API key required for local embeddings
         // Initialize services
         this.mongoClient = new mongodb_client_js_1.MongoDBClient(mongoConnectionString, dbName);
-        this.localEmbeddingService = new local_embedding_service_js_1.LocalEmbeddingService(); // Using local HuggingFace model
+        this.localEmbeddingService = new local_embedding_service_js_1.LocalEmbeddingService();
         this.nerService = new medical_ner_service_js_1.MedicalNERService();
         this.ocrService = new ocr_service_js_1.OCRService();
         this.pdfService = new pdf_service_js_1.PDFService();
-        // Initialize tools
-        this.documentTools = new document_tools_js_1.DocumentTools(this.mongoClient, this.localEmbeddingService, // Using local embedding service instead of OpenAI
-        this.nerService, this.ocrService, this.pdfService);
-        this.medicalTools = new medical_tools_js_1.MedicalTools(this.mongoClient, this.nerService, this.localEmbeddingService // Using local embedding service
-        );
-        // Initialize local embedding tools
+        // Initialize tools with LOCAL embedding service
+        this.documentTools = new document_tools_js_1.DocumentTools(this.mongoClient, this.localEmbeddingService, this.nerService, this.ocrService, this.pdfService);
+        this.medicalTools = new medical_tools_js_1.MedicalTools(this.mongoClient, this.nerService, this.localEmbeddingService);
         this.localEmbeddingTools = new local_embedding_tools_js_1.LocalEmbeddingTools(this.mongoClient);
         // Initialize MCP server
         this.server = new index_js_1.Server({
             name: 'medical-mcp-server',
             version: '1.0.0',
-            description: 'Medical MCP Server with local embeddings, document processing, NER, and vector search capabilities'
+            description: 'Medical MCP Server with Local HuggingFace embeddings, document processing, NER, and vector search capabilities'
         }, {
             capabilities: {
                 tools: {},
@@ -99,47 +97,63 @@ class MedicalMCPServer {
         this.server.setRequestHandler(types_js_1.CallToolRequestSchema, async (request) => {
             const { name, arguments: args } = request.params;
             try {
-                if (isStdioMode) {
-                    logger.error(`Handling tool call: ${name}`);
-                }
+                // ADD DEBUG LINE
+                console.log(`🔧 TOOL CALLED: "${name}" with args:`, JSON.stringify(args, null, 2));
                 switch (name) {
                     // Document tools
                     case 'uploadDocument':
+                        console.log(`📤 Routing to DocumentTools.handleUploadDocument`);
                         return await this.documentTools.handleUploadDocument(args || {});
                     case 'searchDocuments':
+                        console.log(`🔍 Routing to DocumentTools.handleSearchDocuments`);
                         return await this.documentTools.handleSearchDocuments(args || {});
                     case 'listDocuments':
+                        console.log(`📋 Routing to DocumentTools.handleListDocuments`);
                         return await this.documentTools.handleListDocuments(args || {});
                     // Medical tools
                     case 'extractMedicalEntities':
+                        console.log(`🏷️ Routing to MedicalTools.handleExtractMedicalEntities`);
                         return await this.medicalTools.handleExtractMedicalEntities(args || {});
                     case 'findSimilarCases':
+                        console.log(`🔗 Routing to MedicalTools.handleFindSimilarCases`);
                         return await this.medicalTools.handleFindSimilarCases(args || {});
                     case 'analyzePatientHistory':
+                        console.log(`📈 Routing to MedicalTools.handleAnalyzePatientHistory`);
                         return await this.medicalTools.handleAnalyzePatientHistory(args || {});
                     case 'getMedicalInsights':
+                        console.log(`💡 Routing to MedicalTools.handleMedicalInsights`);
                         return await this.medicalTools.handleMedicalInsights(args || {});
                     // Local embedding tools
                     case 'generateEmbeddingLocal':
+                        console.log(`🧠 Routing to LocalEmbeddingTools.handleGenerateEmbedding`);
                         return await this.localEmbeddingTools.handleGenerateEmbedding(args || {});
                     case 'chunkAndEmbedDocument':
+                        console.log(`📄 Routing to LocalEmbeddingTools.handleChunkAndEmbed`);
                         return await this.localEmbeddingTools.handleChunkAndEmbed(args || {});
                     case 'semanticSearchLocal':
+                        console.log(`🔍 Routing to LocalEmbeddingTools.handleSemanticSearch`);
                         return await this.localEmbeddingTools.handleSemanticSearch(args || {});
                     // Legacy tool names for backward compatibility
                     case 'upload_document':
+                        console.log(`📤 Routing to uploadDocument (legacy)`);
                         return await this.documentTools.handleUploadDocument(args || {});
                     case 'extract_text':
+                        console.log(`📝 Routing to handleExtractText (legacy)`);
                         return await this.handleExtractText(args || {});
                     case 'extract_medical_entities':
+                        console.log(`🏷️ Routing to extractMedicalEntities (legacy)`);
                         return await this.medicalTools.handleExtractMedicalEntities(args || {});
                     case 'search_by_diagnosis':
+                        console.log(`🔍 Routing to handleSearchByDiagnosis (legacy)`);
                         return await this.handleSearchByDiagnosis(args || {});
                     case 'semantic_search':
+                        console.log(`🔍 Routing to handleSemanticSearch (legacy)`);
                         return await this.handleSemanticSearch(args || {});
                     case 'get_patient_summary':
+                        console.log(`📊 Routing to handleGetPatientSummary (legacy)`);
                         return await this.handleGetPatientSummary(args || {});
                     default:
+                        console.log(`❌ UNKNOWN TOOL: "${name}"`);
                         throw new Error(`Unknown tool: ${name}`);
                 }
             }
@@ -163,37 +177,62 @@ class MedicalMCPServer {
         });
     }
     // Handle tool calls for HTTP mode
+    // Replace the handleToolCall method in your src/server.ts
     async handleToolCall(name, args) {
         try {
+            // ADD DEBUG LOGGING FOR HTTP MODE
+            console.log(`🔧 HTTP TOOL CALLED: "${name}" with args:`, JSON.stringify(args, null, 2));
             switch (name) {
                 // Document tools
                 case 'uploadDocument':
+                    console.log(`📤 HTTP Routing to DocumentTools.handleUploadDocument`);
                     return await this.documentTools.handleUploadDocument(args || {});
                 case 'searchDocuments':
+                    console.log(`🔍 HTTP Routing to DocumentTools.handleSearchDocuments`);
                     return await this.documentTools.handleSearchDocuments(args || {});
                 case 'listDocuments':
+                    console.log(`📋 HTTP Routing to DocumentTools.handleListDocuments`);
                     return await this.documentTools.handleListDocuments(args || {});
                 // Medical tools
                 case 'extractMedicalEntities':
+                    console.log(`🏷️ HTTP Routing to MedicalTools.handleExtractMedicalEntities`);
                     return await this.medicalTools.handleExtractMedicalEntities(args || {});
                 case 'findSimilarCases':
+                    console.log(`🔗 HTTP Routing to MedicalTools.handleFindSimilarCases`);
                     return await this.medicalTools.handleFindSimilarCases(args || {});
                 case 'analyzePatientHistory':
+                    console.log(`📈 HTTP Routing to MedicalTools.handleAnalyzePatientHistory`);
                     return await this.medicalTools.handleAnalyzePatientHistory(args || {});
                 case 'getMedicalInsights':
+                    console.log(`💡 HTTP Routing to MedicalTools.handleMedicalInsights`);
                     return await this.medicalTools.handleMedicalInsights(args || {});
-                // Local embedding tools
+                // Local embedding tools (these were incorrectly labeled as Google)
                 case 'generateEmbeddingLocal':
+                    console.log(`🧠 HTTP Routing to LocalEmbeddingTools.handleGenerateEmbedding`);
                     return await this.localEmbeddingTools.handleGenerateEmbedding(args || {});
                 case 'chunkAndEmbedDocument':
+                    console.log(`📄 HTTP Routing to LocalEmbeddingTools.handleChunkAndEmbed`);
                     return await this.localEmbeddingTools.handleChunkAndEmbed(args || {});
                 case 'semanticSearchLocal':
+                    console.log(`🔍 HTTP Routing to LocalEmbeddingTools.handleSemanticSearch`);
                     return await this.localEmbeddingTools.handleSemanticSearch(args || {});
+                // Legacy compatibility
+                case 'generateEmbeddingGoogle':
+                    console.log(`🧠 HTTP Routing to LocalEmbeddingTools.handleGenerateEmbedding (legacy)`);
+                    return await this.localEmbeddingTools.handleGenerateEmbedding(args || {});
+                case 'semanticSearchGoogle':
+                    console.log(`🔍 HTTP Routing to LocalEmbeddingTools.handleSemanticSearch (legacy)`);
+                    return await this.localEmbeddingTools.handleSemanticSearch(args || {});
+                case 'hybridSearch':
+                    console.log(`🔄 HTTP Routing to LocalEmbeddingTools.handleHybridSearch (legacy)`);
+                    return await this.localEmbeddingTools.handleSemanticSearch(args || {}); // Note: using semantic search as fallback
                 default:
+                    console.log(`❌ HTTP UNKNOWN TOOL: "${name}"`);
                     throw new Error(`Unknown tool: ${name}`);
             }
         }
         catch (error) {
+            console.error(`❌ HTTP Tool call failed for ${name}:`, error);
             return {
                 content: [
                     {
@@ -257,14 +296,14 @@ class MedicalMCPServer {
     async start() {
         try {
             if (isHttpMode) {
-                logger.log('🏥 Medical MCP Server v1.0.0 (HTTP Mode)');
+                logger.log('🏥 Medical MCP Server v1.0.0 (HTTP Mode with Google Gemini Embeddings)');
                 logger.log('==========================================');
             }
             else if (isStdioMode) {
                 logger.error('Starting Medical MCP Server in stdio mode...');
             }
             else {
-                logger.log('🏥 Medical MCP Server v1.0.0');
+                logger.log('🏥 Medical MCP Server v1.0.0 (Google Gemini Embeddings)');
                 logger.log('=====================================');
                 logger.log('Starting Medical MCP Server...');
             }
@@ -276,13 +315,13 @@ class MedicalMCPServer {
             else {
                 logger.log('✓ MongoDB connection established');
             }
-            // Initialize local embedding service
+            // Initialize Google embedding service
             await this.localEmbeddingService.initialize();
             if (isStdioMode) {
-                logger.error('Local embedding service initialized successfully');
+                logger.error('Google Embedding service initialized successfully');
             }
             else {
-                logger.log('✓ Local embedding service initialized (HuggingFace Transformers)');
+                logger.log('✓ Google Embedding service initialized (Gemini)');
             }
             // Initialize OCR service
             await this.ocrService.initialize();
@@ -306,6 +345,7 @@ class MedicalMCPServer {
                         status: 'healthy',
                         server: 'medical-mcp-server',
                         version: '1.0.0',
+                        embeddingService: 'Google Gemini',
                         timestamp: new Date().toISOString()
                     });
                 });
@@ -313,6 +353,7 @@ class MedicalMCPServer {
                 app.post('/mcp', async (req, res) => {
                     try {
                         // Handle MCP requests via HTTP
+                        console.log(`📨 HTTP REQUEST: ${req.body.method} - ${JSON.stringify(req.body, null, 2)}`);
                         const request = req.body;
                         // Set appropriate headers for Streamable HTTP
                         res.setHeader('Content-Type', 'application/json');
@@ -344,12 +385,12 @@ class MedicalMCPServer {
                             const listResult = await this.server.setRequestHandler(types_js_1.ListToolsRequestSchema, async () => {
                                 const documentTools = this.documentTools.getAllTools();
                                 const medicalTools = this.medicalTools.getAllTools();
-                                const localEmbeddingTools = this.localEmbeddingTools.getAllTools();
+                                const googleEmbeddingTools = this.localEmbeddingTools.getAllTools();
                                 return {
                                     tools: [
                                         ...documentTools,
                                         ...medicalTools,
-                                        ...localEmbeddingTools
+                                        ...googleEmbeddingTools
                                     ],
                                 };
                             });
@@ -433,7 +474,7 @@ class MedicalMCPServer {
             const stats = await this.getStatistics();
             logger.log(`📄 Documents in database: ${stats.documentsCount}`);
             logger.log(`🔧 Tools available: ${stats.toolsAvailable}`);
-            logger.log(`🤖 Embedding model: ${stats.embeddingModel} (Local)`);
+            logger.log(`🤖 Embedding model: ${stats.embeddingModel} (Google Gemini)`);
             logger.log(`⏱️  Server uptime: ${Math.round(stats.uptime)}s`);
             logger.log('\n📝 Available tools:');
             logger.log('   📤 uploadDocument - Upload and process medical documents');
@@ -443,9 +484,10 @@ class MedicalMCPServer {
             logger.log('   🔗 findSimilarCases - Find similar medical cases');
             logger.log('   📈 analyzePatientHistory - Analyze patient medical history');
             logger.log('   💡 getMedicalInsights - Get medical insights and recommendations');
-            logger.log('   🧠 generateEmbeddingLocal - Generate embeddings locally');
+            logger.log('   🧠 generateEmbeddingGoogle - Generate embeddings with Google Gemini');
             logger.log('   📄 chunkAndEmbedDocument - Chunk and embed large documents');
-            logger.log('   🔍 semanticSearchLocal - Search using local embeddings');
+            logger.log('   🔍 semanticSearchGoogle - Search using Google embeddings');
+            logger.log('   🔄 hybridSearch - Combined vector and text search');
             logger.log('\n💬 The server is now listening for MCP client connections...');
         }
         catch (error) {
@@ -487,8 +529,8 @@ class MedicalMCPServer {
             services.mongodb = false;
             allHealthy = false;
         }
-        services.localEmbedding = this.localEmbeddingService.isReady();
-        if (!services.localEmbedding)
+        services.googleEmbedding = this.localEmbeddingService.isReady();
+        if (!services.googleEmbedding)
             allHealthy = false;
         services.ner = true; // NER service is always available
         services.ocr = this.ocrService ? true : false;
@@ -505,11 +547,11 @@ class MedicalMCPServer {
             const documentsCount = await this.mongoClient.countDocuments();
             const documentTools = this.documentTools.getAllTools();
             const medicalTools = this.medicalTools.getAllTools();
-            const localEmbeddingTools = this.localEmbeddingTools.getAllTools();
+            const googleEmbeddingTools = this.localEmbeddingTools.getAllTools();
             const embeddingModel = this.localEmbeddingService.getModelInfo();
             return {
                 documentsCount,
-                toolsAvailable: documentTools.length + medicalTools.length + localEmbeddingTools.length,
+                toolsAvailable: documentTools.length + medicalTools.length + googleEmbeddingTools.length,
                 embeddingModel: embeddingModel.model,
                 uptime: process.uptime()
             };

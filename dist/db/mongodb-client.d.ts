@@ -35,11 +35,13 @@ export declare class MongoDBClient {
     constructor(connectionString: string, dbName?: string);
     connect(): Promise<void>;
     disconnect(): Promise<void>;
-    private createIndexes;
+    private createBasicIndexes;
     insertDocument(document: MedicalDocument): Promise<string>;
     updateDocument(id: string, updates: Partial<MedicalDocument>): Promise<boolean>;
     vectorSearch(queryEmbedding: number[], limit?: number, threshold?: number, filter?: Record<string, any>): Promise<SearchResult[]>;
-    textSearch(query: string, limit?: number): Promise<SearchResult[]>;
+    textSearch(query: string, limit?: number, filter?: Record<string, any>): Promise<SearchResult[]>;
+    private textSearchFallback;
+    hybridSearch(query: string, queryEmbedding: number[], limit?: number, vectorWeight?: number, textWeight?: number, filter?: Record<string, any>): Promise<SearchResult[]>;
     findDocuments(filter?: Record<string, any>, limit?: number, offset?: number): Promise<MedicalDocument[]>;
     findDocumentById(id: string): Promise<MedicalDocument | null>;
     deleteDocument(id: string): Promise<boolean>;

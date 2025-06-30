@@ -1,7 +1,7 @@
 import { Tool } from '@modelcontextprotocol/sdk/types.js';
 import { MongoDBClient } from '../db/mongodb-client.js';
 import { MedicalNERService } from '../services/medical-ner-service.js';
-import { EmbeddingService } from '../services/embedding-service.js';
+import { LocalEmbeddingService } from '../services/local-embedding-service.js';
 export interface ExtractMedicalEntitiesRequest {
     text: string;
     documentId?: string;
@@ -37,7 +37,7 @@ export declare class MedicalTools {
     private mongoClient;
     private nerService;
     private embeddingService;
-    constructor(mongoClient: MongoDBClient, nerService: MedicalNERService, embeddingService: EmbeddingService);
+    constructor(mongoClient: MongoDBClient, nerService: MedicalNERService, embeddingService: LocalEmbeddingService);
     createExtractMedicalEntitiesTool(): Tool;
     handleExtractMedicalEntities(args: ExtractMedicalEntitiesRequest): Promise<any>;
     createFindSimilarCasesTool(): Tool;

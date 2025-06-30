@@ -59,7 +59,7 @@ export class GoogleEmbeddingService implements EmbeddingServiceInterface {
         throw new Error('No embeddings returned from Google API');
       }
 
-      return response.embeddings[0].values;
+      return response.embeddings[0]?.values || [];
     } catch (error) {
       console.error('Failed to generate Google embedding:', error);
       throw new Error(`Google embedding generation failed: ${error}`);
@@ -170,7 +170,7 @@ export class GoogleEmbeddingService implements EmbeddingServiceInterface {
   async findSimilarTexts(
     queryEmbedding: number[], 
     candidateEmbeddings: Array<{id: string, embedding: number[]}>,
-    threshold: number = 0.7
+    threshold: number = 0.3
   ): Promise<Array<{id: string, similarity: number}>> {
     try {
       const similarities = await Promise.all(
