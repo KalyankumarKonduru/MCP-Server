@@ -1,7 +1,8 @@
+// src/tools/medical-tools.ts
 import { Tool } from '@modelcontextprotocol/sdk/types.js';
 import { MongoDBClient, MedicalDocument, MedicalEntity } from '../db/mongodb-client.js';
 import { MedicalNERService } from '../services/medical-ner-service.js';
-import { EmbeddingService } from '../services/embedding-service.js';
+import { GoogleEmbeddingService } from '../services/google-embedding-service.js';
 
 export interface ExtractMedicalEntitiesRequest {
   text: string;
@@ -42,13 +43,13 @@ export class MedicalTools {
   constructor(
     private mongoClient: MongoDBClient,
     private nerService: MedicalNERService,
-    private embeddingService: EmbeddingService
+    private embeddingService: GoogleEmbeddingService
   ) {}
 
   createExtractMedicalEntitiesTool(): Tool {
     return {
       name: 'extractMedicalEntities',
-      description: 'Extract medical entities (medications, conditions, procedures, etc.) from text',
+      description: 'Extract medical entities (medications, conditions, procedures, etc.) from text using advanced NER',
       inputSchema: {
         type: 'object',
         properties: {
@@ -110,7 +111,8 @@ export class MedicalTools {
                 confidence: entity.confidence,
                 context: entity.context?.substring(0, 100) + '...'
               })),
-              documentUpdated: !!args.documentId
+              documentUpdated: !!args.documentId,
+              processingModel: 'advanced-medical-ner'
             }, null, 2)
           }
         ]
@@ -135,7 +137,7 @@ export class MedicalTools {
   createFindSimilarCasesTool(): Tool {
     return {
       name: 'findSimilarCases',
-      description: 'Find similar medical cases based on symptoms, conditions, or medications',
+      description: 'Find similar medical cases based on symptoms, conditions, or medications using Google Gemini embeddings',
       inputSchema: {
         type: 'object',
         properties: {
@@ -204,7 +206,7 @@ export class MedicalTools {
         throw new Error('No search criteria provided');
       }
 
-      // Create search query
+      // Create search query and generate embedding using Google Gemini
       const searchQuery = searchTerms.join(' ');
       const queryEmbedding = await this.embeddingService.generateQueryEmbedding(searchQuery);
 
@@ -217,7 +219,7 @@ export class MedicalTools {
         excludeFilter['_id'] = { $ne: args.documentId };
       }
 
-      // Search for similar cases
+      // Search for similar cases using Google Gemini embeddings
       const similarCases = await this.mongoClient.vectorSearch(
         queryEmbedding,
         args.limit || 10,
@@ -249,6 +251,7 @@ export class MedicalTools {
             type: 'text',
             text: JSON.stringify({
               success: true,
+              embeddingModel: 'gemini-embedding-exp-03-07',
               searchCriteria: {
                 patientId: args.patientId,
                 documentId: args.documentId,
@@ -280,7 +283,7 @@ export class MedicalTools {
   createAnalyzePatientHistoryTool(): Tool {
     return {
       name: 'analyzePatientHistory',
-      description: 'Analyze patient medical history and generate insights',
+      description: 'Analyze patient medical history and generate insights using advanced analytics',
       inputSchema: {
         type: 'object',
         properties: {
@@ -352,7 +355,8 @@ export class MedicalTools {
               analysisType,
               documentsAnalyzed: filteredDocs.length,
               dateRange: args.dateRange,
-              analysis
+              analysis,
+              processingModel: 'advanced-medical-analytics'
             }, null, 2)
           }
         ]
@@ -377,7 +381,7 @@ export class MedicalTools {
   createMedicalInsightsTool(): Tool {
     return {
       name: 'getMedicalInsights',
-      description: 'Get medical insights and recommendations based on query and context',
+      description: 'Get medical insights and recommendations based on query and context using Google Gemini embeddings',
       inputSchema: {
         type: 'object',
         properties: {
@@ -415,7 +419,7 @@ export class MedicalTools {
 
   async handleMedicalInsights(args: MedicalInsightsRequest): Promise<any> {
     try {
-      // Generate query embedding with context
+      // Generate query embedding with context using Google Gemini
       let contextualQuery = args.query;
       if (args.context) {
         const contextParts = [];
@@ -431,7 +435,7 @@ export class MedicalTools {
 
       const queryEmbedding = await this.embeddingService.generateQueryEmbedding(contextualQuery);
 
-      // Search for relevant documents
+      // Search for relevant documents using Google Gemini embeddings
       const relevantDocs = await this.mongoClient.vectorSearch(
         queryEmbedding,
         args.limit || 5,
@@ -470,6 +474,7 @@ export class MedicalTools {
               success: true,
               query: args.query,
               context: args.context,
+              embeddingModel: 'gemini-embedding-exp-03-07',
               insightsFound: insights.length,
               insights
             }, null, 2)
@@ -626,4 +631,3 @@ export class MedicalTools {
     ];
   }
 }
-
