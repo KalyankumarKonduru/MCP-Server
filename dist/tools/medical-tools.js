@@ -13,7 +13,7 @@ class MedicalTools {
     createExtractMedicalEntitiesTool() {
         return {
             name: 'extractMedicalEntities',
-            description: 'Extract medical entities (medications, conditions, procedures, etc.) from text',
+            description: 'Extract medical entities (medications, conditions, procedures, etc.) from text using advanced NER',
             inputSchema: {
                 type: 'object',
                 properties: {
@@ -70,7 +70,8 @@ class MedicalTools {
                                 confidence: entity.confidence,
                                 context: entity.context?.substring(0, 100) + '...'
                             })),
-                            documentUpdated: !!args.documentId
+                            documentUpdated: !!args.documentId,
+                            processingModel: 'advanced-medical-ner'
                         }, null, 2)
                     }
                 ]
@@ -95,7 +96,7 @@ class MedicalTools {
     createFindSimilarCasesTool() {
         return {
             name: 'findSimilarCases',
-            description: 'Find similar medical cases based on symptoms, conditions, or medications',
+            description: 'Find similar medical cases based on symptoms, conditions, or medications using local embeddings',
             inputSchema: {
                 type: 'object',
                 properties: {
@@ -163,7 +164,7 @@ class MedicalTools {
             if (searchTerms.length === 0) {
                 throw new Error('No search criteria provided');
             }
-            // Create search query
+            // Create search query and generate embedding using local model
             const searchQuery = searchTerms.join(' ');
             const queryEmbedding = await this.embeddingService.generateQueryEmbedding(searchQuery);
             // Exclude the reference patient/document from results
@@ -174,7 +175,7 @@ class MedicalTools {
             if (args.documentId) {
                 excludeFilter['_id'] = { $ne: args.documentId };
             }
-            // Search for similar cases
+            // Search for similar cases using local embeddings
             const similarCases = await this.mongoClient.vectorSearch(queryEmbedding, args.limit || 10, 0.6, // Lower threshold for finding similar cases
             excludeFilter);
             // Analyze similarity reasons
@@ -196,6 +197,7 @@ class MedicalTools {
                         type: 'text',
                         text: JSON.stringify({
                             success: true,
+                            embeddingModel: this.embeddingService.getModelInfo().model,
                             searchCriteria: {
                                 patientId: args.patientId,
                                 documentId: args.documentId,
@@ -227,7 +229,7 @@ class MedicalTools {
     createAnalyzePatientHistoryTool() {
         return {
             name: 'analyzePatientHistory',
-            description: 'Analyze patient medical history and generate insights',
+            description: 'Analyze patient medical history and generate insights using advanced analytics',
             inputSchema: {
                 type: 'object',
                 properties: {
@@ -293,7 +295,8 @@ class MedicalTools {
                             analysisType,
                             documentsAnalyzed: filteredDocs.length,
                             dateRange: args.dateRange,
-                            analysis
+                            analysis,
+                            processingModel: 'advanced-medical-analytics'
                         }, null, 2)
                     }
                 ]
@@ -318,7 +321,7 @@ class MedicalTools {
     createMedicalInsightsTool() {
         return {
             name: 'getMedicalInsights',
-            description: 'Get medical insights and recommendations based on query and context',
+            description: 'Get medical insights and recommendations based on query and context using local embeddings',
             inputSchema: {
                 type: 'object',
                 properties: {
@@ -355,7 +358,7 @@ class MedicalTools {
     }
     async handleMedicalInsights(args) {
         try {
-            // Generate query embedding with context
+            // Generate query embedding with context using local model
             let contextualQuery = args.query;
             if (args.context) {
                 const contextParts = [];
@@ -372,7 +375,7 @@ class MedicalTools {
                 }
             }
             const queryEmbedding = await this.embeddingService.generateQueryEmbedding(contextualQuery);
-            // Search for relevant documents
+            // Search for relevant documents using local embeddings
             const relevantDocs = await this.mongoClient.vectorSearch(queryEmbedding, args.limit || 5, 0.6);
             // Generate insights from relevant documents
             const insights = relevantDocs.map(result => {
@@ -398,6 +401,7 @@ class MedicalTools {
                             success: true,
                             query: args.query,
                             context: args.context,
+                            embeddingModel: this.embeddingService.getModelInfo().model,
                             insightsFound: insights.length,
                             insights
                         }, null, 2)

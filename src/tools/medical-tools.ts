@@ -2,7 +2,7 @@
 import { Tool } from '@modelcontextprotocol/sdk/types.js';
 import { MongoDBClient, MedicalDocument, MedicalEntity } from '../db/mongodb-client.js';
 import { MedicalNERService } from '../services/medical-ner-service.js';
-import { GoogleEmbeddingService } from '../services/google-embedding-service.js';
+import { LocalEmbeddingService } from '../services/local-embedding-service.js';
 
 export interface ExtractMedicalEntitiesRequest {
   text: string;
@@ -43,7 +43,7 @@ export class MedicalTools {
   constructor(
     private mongoClient: MongoDBClient,
     private nerService: MedicalNERService,
-    private embeddingService: GoogleEmbeddingService
+    private embeddingService: LocalEmbeddingService
   ) {}
 
   createExtractMedicalEntitiesTool(): Tool {
@@ -137,7 +137,7 @@ export class MedicalTools {
   createFindSimilarCasesTool(): Tool {
     return {
       name: 'findSimilarCases',
-      description: 'Find similar medical cases based on symptoms, conditions, or medications using Google Gemini embeddings',
+      description: 'Find similar medical cases based on symptoms, conditions, or medications using local embeddings',
       inputSchema: {
         type: 'object',
         properties: {
@@ -206,7 +206,7 @@ export class MedicalTools {
         throw new Error('No search criteria provided');
       }
 
-      // Create search query and generate embedding using Google Gemini
+      // Create search query and generate embedding using local model
       const searchQuery = searchTerms.join(' ');
       const queryEmbedding = await this.embeddingService.generateQueryEmbedding(searchQuery);
 
@@ -219,11 +219,11 @@ export class MedicalTools {
         excludeFilter['_id'] = { $ne: args.documentId };
       }
 
-      // Search for similar cases using Google Gemini embeddings
+      // Search for similar cases using local embeddings
       const similarCases = await this.mongoClient.vectorSearch(
         queryEmbedding,
         args.limit || 10,
-        0.6, // Lower threshold for finding similar cases
+        0.3, // Lower threshold for finding similar cases
         excludeFilter
       );
 
@@ -245,13 +245,13 @@ export class MedicalTools {
         };
       });
 
-      return {
+                    return {
         content: [
           {
             type: 'text',
             text: JSON.stringify({
               success: true,
-              embeddingModel: 'gemini-embedding-exp-03-07',
+              embeddingModel: this.embeddingService.getModelInfo().model,
               searchCriteria: {
                 patientId: args.patientId,
                 documentId: args.documentId,
@@ -381,7 +381,7 @@ export class MedicalTools {
   createMedicalInsightsTool(): Tool {
     return {
       name: 'getMedicalInsights',
-      description: 'Get medical insights and recommendations based on query and context using Google Gemini embeddings',
+      description: 'Get medical insights and recommendations based on query and context using local embeddings',
       inputSchema: {
         type: 'object',
         properties: {
@@ -419,7 +419,7 @@ export class MedicalTools {
 
   async handleMedicalInsights(args: MedicalInsightsRequest): Promise<any> {
     try {
-      // Generate query embedding with context using Google Gemini
+      // Generate query embedding with context using local model
       let contextualQuery = args.query;
       if (args.context) {
         const contextParts = [];
@@ -435,7 +435,7 @@ export class MedicalTools {
 
       const queryEmbedding = await this.embeddingService.generateQueryEmbedding(contextualQuery);
 
-      // Search for relevant documents using Google Gemini embeddings
+      // Search for relevant documents using local embeddings
       const relevantDocs = await this.mongoClient.vectorSearch(
         queryEmbedding,
         args.limit || 5,
@@ -474,7 +474,7 @@ export class MedicalTools {
               success: true,
               query: args.query,
               context: args.context,
-              embeddingModel: 'gemini-embedding-exp-03-07',
+              embeddingModel: this.embeddingService.getModelInfo().model,
               insightsFound: insights.length,
               insights
             }, null, 2)

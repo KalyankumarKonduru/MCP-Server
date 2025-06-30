@@ -154,7 +154,7 @@ export class LocalEmbeddingService implements EmbeddingServiceInterface {
   async findSimilarTexts(
     queryEmbedding: number[], 
     candidateEmbeddings: Array<{id: string, embedding: number[]}>,
-    threshold: number = 0.7
+    threshold: number = 0.3
   ): Promise<Array<{id: string, similarity: number}>> {
     try {
       const similarities = await Promise.all(

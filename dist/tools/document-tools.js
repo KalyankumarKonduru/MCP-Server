@@ -51,7 +51,7 @@ class DocumentTools {
     createUploadDocumentTool() {
         return {
             name: 'uploadDocument',
-            description: 'Upload and process a medical document with automatic text extraction, NER, and embedding generation',
+            description: 'Upload and process a medical document with automatic text extraction, NER, and local embedding generation',
             inputSchema: {
                 type: 'object',
                 properties: {
@@ -119,7 +119,7 @@ class DocumentTools {
             // Extract medical entities
             const medicalEntitiesResult = await this.nerService.extractEntities(extractedText);
             const medicalEntities = medicalEntitiesResult.entities;
-            // Generate embedding using local service
+            // Generate embedding using Local HuggingFace model
             const embedding = await this.embeddingService.generateMedicalDocumentEmbedding(args.title, extractedText, medicalEntities.map(e => ({ text: e.text, label: e.label })));
             // Create document object
             const document = {
@@ -147,6 +147,7 @@ class DocumentTools {
                                 textLength: extractedText.length,
                                 entitiesFound: medicalEntities.length,
                                 embeddingDimensions: embedding.length,
+                                embeddingModel: 'all-MiniLM-L6-v2',
                                 ...processingResults
                             },
                             medicalEntities: medicalEntities.slice(0, 10) // Show first 10 entities
@@ -174,7 +175,7 @@ class DocumentTools {
     createSearchDocumentsTool() {
         return {
             name: 'searchDocuments',
-            description: 'Search medical documents using semantic similarity and filters',
+            description: 'Search medical documents using local HuggingFace semantic similarity, text search, or hybrid approach with filters',
             inputSchema: {
                 type: 'object',
                 properties: {
@@ -191,6 +192,23 @@ class DocumentTools {
                     threshold: {
                         type: 'number',
                         description: 'Minimum similarity score (default: 0.7)',
+                        minimum: 0,
+                        maximum: 1
+                    },
+                    searchType: {
+                        type: 'string',
+                        enum: ['vector', 'text', 'hybrid'],
+                        description: 'Type of search to perform (default: hybrid)'
+                    },
+                    vectorWeight: {
+                        type: 'number',
+                        description: 'Weight for vector search in hybrid mode (default: 0.7)',
+                        minimum: 0,
+                        maximum: 1
+                    },
+                    textWeight: {
+                        type: 'number',
+                        description: 'Weight for text search in hybrid mode (default: 0.3)',
                         minimum: 0,
                         maximum: 1
                     },
@@ -226,8 +244,67 @@ class DocumentTools {
     }
     async handleSearchDocuments(args) {
         try {
-            // Generate query embedding using local service
-            const queryEmbedding = await this.embeddingService.generateQueryEmbedding(args.query);
+            console.log(`🔍 SEARCH TOOL CALLED - Query: "${args.query}"`);
+            console.log(`🔍 SEARCH ARGS:`, JSON.stringify(args, null, 2));
+            const searchType = args.searchType || 'hybrid';
+            const limit = args.limit || 10;
+            const threshold = args.threshold || 0.7;
+            console.log(`🔍 SEARCH PARAMS - Type: ${searchType}, Limit: ${limit}, Threshold: ${threshold}`);
+            // DEBUG: Check database state first
+            console.log(`📊 Checking database state...`);
+            const totalDocs = await this.mongoClient.countDocuments();
+            const docsWithEmbeddings = await this.mongoClient.countDocuments({ embedding: { $exists: true } });
+            console.log(`📊 DATABASE STATE - Total docs: ${totalDocs}, With embeddings: ${docsWithEmbeddings}`);
+            if (totalDocs === 0) {
+                console.log(`❌ No documents in database`);
+                return {
+                    content: [{
+                            type: 'text',
+                            text: JSON.stringify({
+                                success: true,
+                                query: args.query,
+                                resultsCount: 0,
+                                results: [],
+                                message: "No documents in database"
+                            }, null, 2)
+                        }]
+                };
+            }
+            if (docsWithEmbeddings === 0) {
+                console.log(`❌ No documents with embeddings`);
+                return {
+                    content: [{
+                            type: 'text',
+                            text: JSON.stringify({
+                                success: true,
+                                query: args.query,
+                                resultsCount: 0,
+                                results: [],
+                                message: "No documents have embeddings"
+                            }, null, 2)
+                        }]
+                };
+            }
+            // Test embedding generation
+            console.log(`🧠 Testing embedding generation...`);
+            try {
+                const testEmbedding = await this.embeddingService.generateQueryEmbedding(args.query);
+                console.log(`✅ Generated embedding: ${testEmbedding.length} dimensions`);
+                console.log(`🔍 Embedding preview: [${testEmbedding.slice(0, 5).map(v => v.toFixed(4)).join(', ')}...]`);
+            }
+            catch (embError) {
+                console.error(`❌ Embedding generation failed:`, embError);
+                return {
+                    content: [{
+                            type: 'text',
+                            text: JSON.stringify({
+                                success: false,
+                                error: `Embedding generation failed: ${embError instanceof Error ? embError.message : embError}`,
+                                query: args.query
+                            }, null, 2)
+                        }]
+                };
+            }
             // Build MongoDB filter
             const mongoFilter = {};
             if (args.filter?.documentType) {
@@ -236,17 +313,37 @@ class DocumentTools {
             if (args.filter?.patientId) {
                 mongoFilter['metadata.patientId'] = args.filter.patientId;
             }
-            if (args.filter?.tags && args.filter.tags.length > 0) {
-                mongoFilter['metadata.tags'] = { $in: args.filter.tags };
+            console.log(`🔍 MONGO FILTER:`, mongoFilter);
+            let searchResults;
+            // Always try vector search first for debugging
+            console.log(`🧠 Attempting vector search...`);
+            try {
+                const queryEmbedding = await this.embeddingService.generateQueryEmbedding(args.query);
+                console.log(`📐 Query embedding generated: ${queryEmbedding.length} dims`);
+                searchResults = await this.mongoClient.vectorSearch(queryEmbedding, limit, threshold, mongoFilter);
+                console.log(`📊 Vector search returned: ${searchResults.length} results`);
             }
-            if (args.filter?.dateRange) {
-                mongoFilter['metadata.uploadedAt'] = {
-                    $gte: new Date(args.filter.dateRange.start),
-                    $lte: new Date(args.filter.dateRange.end)
-                };
+            catch (vectorError) {
+                console.error(`❌ Vector search failed:`, vectorError);
+                // Fallback to text search
+                console.log(`🔄 Falling back to text search...`);
+                try {
+                    searchResults = await this.mongoClient.textSearch(args.query, limit, mongoFilter);
+                    console.log(`📊 Text search returned: ${searchResults.length} results`);
+                }
+                catch (textError) {
+                    console.error(`❌ Text search also failed:`, textError);
+                    // Last resort: return all documents
+                    console.log(`🔄 Returning all documents as last resort...`);
+                    const allDocs = await this.mongoClient.findDocuments(mongoFilter, limit);
+                    searchResults = allDocs.map(doc => ({
+                        document: doc,
+                        score: 0.5,
+                        relevantEntities: doc.medicalEntities || []
+                    }));
+                }
             }
-            // Perform vector search
-            const searchResults = await this.mongoClient.vectorSearch(queryEmbedding, args.limit || 10, args.threshold || 0.7, mongoFilter);
+            console.log(`✅ Final search results: ${searchResults.length} documents`);
             // Format results
             const formattedResults = searchResults.map(result => ({
                 id: result.document._id,
@@ -256,6 +353,7 @@ class DocumentTools {
                 metadata: result.document.metadata,
                 relevantEntities: result.relevantEntities?.slice(0, 5) || []
             }));
+            console.log(`📋 Formatted results: ${formattedResults.length} items`);
             return {
                 content: [
                     {
@@ -263,12 +361,19 @@ class DocumentTools {
                         text: JSON.stringify({
                             success: true,
                             query: args.query,
+                            searchType,
+                            embeddingModel: this.embeddingService.getModelInfo().model,
                             resultsCount: searchResults.length,
                             results: formattedResults,
                             searchParameters: {
-                                limit: args.limit || 10,
-                                threshold: args.threshold || 0.7,
+                                limit,
+                                threshold,
                                 filter: args.filter || {}
+                            },
+                            debug: {
+                                totalDocsInDb: totalDocs,
+                                docsWithEmbeddings,
+                                filterApplied: mongoFilter
                             }
                         }, null, 2)
                     }
@@ -276,6 +381,7 @@ class DocumentTools {
             };
         }
         catch (error) {
+            console.error(`❌ Search method completely failed:`, error);
             return {
                 content: [
                     {
@@ -338,6 +444,7 @@ class DocumentTools {
         try {
             const limit = args.limit || 20;
             const offset = args.offset || 0;
+            console.log(`📋 LIST DOCUMENTS DEBUG - Limit: ${limit}, Offset: ${offset}`);
             // Build filter
             const mongoFilter = {};
             if (args.filter?.documentType) {
@@ -352,27 +459,53 @@ class DocumentTools {
             if (args.filter?.processed !== undefined) {
                 mongoFilter['metadata.processed'] = args.filter.processed;
             }
+            console.log(`🔍 LIST FILTER:`, mongoFilter);
             // Get documents and count
             const [documents, totalCount] = await Promise.all([
                 this.mongoClient.findDocuments(mongoFilter, limit, offset),
                 this.mongoClient.countDocuments(mongoFilter)
             ]);
-            // Format results (exclude embeddings for performance)
-            const formattedDocuments = documents.map(doc => ({
-                id: doc._id,
-                title: doc.title,
-                content: doc.content.substring(0, 200) + (doc.content.length > 200 ? '...' : ''),
-                metadata: doc.metadata,
-                entityCount: doc.medicalEntities?.length || 0,
-                hasEmbedding: !!doc.embedding
-            }));
+            console.log(`📊 FOUND: ${documents.length} documents (${totalCount} total)`);
+            // Enhanced document analysis
+            const enhancedDocuments = documents.map(doc => {
+                const docInfo = {
+                    id: doc._id,
+                    title: doc.title,
+                    content: doc.content.substring(0, 200) + (doc.content.length > 200 ? '...' : ''),
+                    contentLength: doc.content.length,
+                    metadata: doc.metadata,
+                    entityCount: doc.medicalEntities?.length || 0,
+                    hasEmbedding: !!doc.embedding,
+                    embeddingDimensions: doc.embedding?.length || null,
+                    embeddingModel: doc.embedding ? this.embeddingService.getModelInfo().model : null
+                };
+                // Add top medical entities for quick reference
+                if (doc.medicalEntities && doc.medicalEntities.length > 0) {
+                    docInfo.topEntities = doc.medicalEntities
+                        .slice(0, 5)
+                        .map(entity => ({
+                        text: entity.text,
+                        label: entity.label,
+                        confidence: entity.confidence
+                    }));
+                }
+                // Add patient info if available
+                if (doc.metadata?.patientId) {
+                    docInfo.patientInfo = {
+                        patientId: doc.metadata.patientId,
+                        documentType: doc.metadata.documentType
+                    };
+                }
+                return docInfo;
+            });
             return {
                 content: [
                     {
                         type: 'text',
                         text: JSON.stringify({
                             success: true,
-                            documents: formattedDocuments,
+                            documents: enhancedDocuments,
+                            embeddingModel: this.embeddingService.getModelInfo().model,
                             pagination: {
                                 limit,
                                 offset,
@@ -388,6 +521,7 @@ class DocumentTools {
             };
         }
         catch (error) {
+            console.error(`❌ List documents failed:`, error);
             return {
                 content: [
                     {

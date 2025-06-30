@@ -21,6 +21,9 @@ export interface SearchDocumentsRequest {
     query: string;
     limit?: number;
     threshold?: number;
+    searchType?: 'vector' | 'text' | 'hybrid';
+    vectorWeight?: number;
+    textWeight?: number;
     filter?: {
         documentType?: string;
         patientId?: string;

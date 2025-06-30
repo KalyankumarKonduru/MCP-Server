@@ -100,7 +100,7 @@ export class MongoDBClient {
   async vectorSearch(
     queryEmbedding: number[], 
     limit: number = 10, 
-    threshold: number = 0.7,
+    threshold: number = 0.3,
     filter?: Record<string, any>
   ): Promise<SearchResult[]> {
     try {
@@ -166,7 +166,7 @@ export class MongoDBClient {
       }));
     } catch (error) {
       console.error('❌ Vector search failed:', error);
-      console.error('Error details:', error.message);
+      console.error('Error details:', error instanceof Error ? error.message : error);
       // Fallback to text search
       return this.textSearchFallback('', limit);
     }
