@@ -176,7 +176,7 @@ class MedicalTools {
                 excludeFilter['_id'] = { $ne: args.documentId };
             }
             // Search for similar cases using local embeddings
-            const similarCases = await this.mongoClient.vectorSearch(queryEmbedding, args.limit || 10, 0.6, // Lower threshold for finding similar cases
+            const similarCases = await this.mongoClient.vectorSearch(queryEmbedding, args.limit || 10, 0.3, // Lower threshold for finding similar cases
             excludeFilter);
             // Analyze similarity reasons
             const analyzedCases = similarCases.map(result => {

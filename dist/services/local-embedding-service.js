@@ -126,7 +126,7 @@ class LocalEmbeddingService {
             throw error;
         }
     }
-    async findSimilarTexts(queryEmbedding, candidateEmbeddings, threshold = 0.7) {
+    async findSimilarTexts(queryEmbedding, candidateEmbeddings, threshold = 0.3) {
         try {
             const similarities = await Promise.all(candidateEmbeddings.map(async (candidate) => ({
                 id: candidate.id,

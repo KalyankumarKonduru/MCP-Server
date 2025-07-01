@@ -282,7 +282,7 @@ class LocalEmbeddingTools {
     async handleSemanticSearch(args) {
         try {
             const topK = args.topK || 5;
-            const threshold = args.threshold || 0.7;
+            const threshold = args.threshold || 0.3;
             console.log(`🔍 Semantic search for: "${args.query}"`);
             // Generate query embedding
             const embedder = await loadEmbedder();
