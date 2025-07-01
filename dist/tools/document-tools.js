@@ -248,7 +248,7 @@ class DocumentTools {
             console.log(`🔍 SEARCH ARGS:`, JSON.stringify(args, null, 2));
             const searchType = args.searchType || 'hybrid';
             const limit = args.limit || 10;
-            const threshold = args.threshold || 0.7;
+            const threshold = args.threshold || 0.3;
             console.log(`🔍 SEARCH PARAMS - Type: ${searchType}, Limit: ${limit}, Threshold: ${threshold}`);
             // DEBUG: Check database state first
             console.log(`📊 Checking database state...`);

@@ -61,7 +61,7 @@ class MongoDBClient {
             throw error;
         }
     }
-    async vectorSearch(queryEmbedding, limit = 10, threshold = 0.7, filter) {
+    async vectorSearch(queryEmbedding, limit = 10, threshold = 0.3, filter) {
         try {
             console.log('🔍 Starting vector search with embedding dims:', queryEmbedding.length);
             console.log('🔍 Search params:', { limit, threshold, filter });

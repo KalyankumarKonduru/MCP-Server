@@ -23,7 +23,7 @@ class EmbeddingService {
     async calculateSimilarity(embedding1, embedding2) {
         throw new Error('EmbeddingService is deprecated. Use LocalEmbeddingService instead.');
     }
-    async findSimilarTexts(queryEmbedding, candidateEmbeddings, threshold = 0.7) {
+    async findSimilarTexts(queryEmbedding, candidateEmbeddings, threshold = 0.3) {
         throw new Error('EmbeddingService is deprecated. Use LocalEmbeddingService instead.');
     }
     getModelInfo() {

@@ -262,7 +262,7 @@ class GoogleEmbeddingTools {
     async handleSemanticSearch(args) {
         try {
             const topK = args.topK || 5;
-            const threshold = args.threshold || 0.7;
+            const threshold = args.threshold || 0.3;
             console.log(`🔍 Semantic search with Google Gemini for: "${args.query}"`);
             // Generate query embedding using Google Gemini
             const queryEmbedding = await this.embeddingService.generateQueryEmbedding(args.query);
@@ -413,7 +413,7 @@ class GoogleEmbeddingTools {
             const topK = args.topK || 10;
             const vectorWeight = args.vectorWeight || 0.7;
             const textWeight = args.textWeight || 0.3;
-            const threshold = args.threshold || 0.5;
+            const threshold = args.threshold || 0.3;
             console.log(`🔄 Hybrid search with Google Gemini for: "${args.query}"`);
             // Generate query embedding using Google Gemini
             const queryEmbedding = await this.embeddingService.generateQueryEmbedding(args.query);
