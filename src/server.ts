@@ -1,6 +1,4 @@
-
-// Update src/server.ts - Just the constructor and imports section
-
+// src/server.ts - Updated with Epic FHIR Integration
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import {
@@ -17,19 +15,17 @@ import { PDFService } from './services/pdf-service.js';
 import { DocumentTools } from './tools/document-tools.js';
 import { MedicalTools } from './tools/medical-tools.js';
 import { LocalEmbeddingTools } from './tools/local-embedding-tools.js';
+import { EpicFHIRTools } from './tools/epic-fhir-tools.js';
 
 // Load environment variables
 dotenv.config();
 
-// Detect if running in stdio mode
 const isStdioMode = process.argv.includes('--stdio') || 
                    process.stdin.isTTY === false ||
                    process.env.MCP_STDIO_MODE === 'true';
 
-// Detect if running in HTTP mode
 const isHttpMode = process.env.MCP_HTTP_MODE === 'true';
 
-// Custom logger that respects stdio mode
 const logger = {
   log: (...args: any[]) => {
     if (!isStdioMode) {
@@ -53,6 +49,7 @@ export class MedicalMCPServer {
   private documentTools: DocumentTools;
   private medicalTools: MedicalTools;
   private localEmbeddingTools: LocalEmbeddingTools;
+  private epicFHIRTools: EpicFHIRTools; // NEW: Epic FHIR integration
 
   constructor() {
     // Validate required environment variables
@@ -63,8 +60,6 @@ export class MedicalMCPServer {
       throw new Error('MONGODB_CONNECTION_STRING environment variable is required');
     }
 
-    // Note: No Google API key required for local embeddings
-
     // Initialize services
     this.mongoClient = new MongoDBClient(mongoConnectionString, dbName);
     this.localEmbeddingService = new LocalEmbeddingService();
@@ -72,7 +67,7 @@ export class MedicalMCPServer {
     this.ocrService = new OCRService();
     this.pdfService = new PDFService();
 
-    // Initialize tools with LOCAL embedding service
+    // Initialize existing tools
     this.documentTools = new DocumentTools(
       this.mongoClient,
       this.localEmbeddingService,
@@ -89,12 +84,20 @@ export class MedicalMCPServer {
 
     this.localEmbeddingTools = new LocalEmbeddingTools(this.mongoClient);
 
+    // NEW: Initialize Epic FHIR tools
+    this.epicFHIRTools = new EpicFHIRTools({
+      baseUrl: process.env.EPIC_FHIR_BASE_URL || 'https://fhir.epic.com/interconnect-fhir-oauth/api/FHIR/R4',
+      useSandbox: process.env.EPIC_USE_SANDBOX !== 'false', // Default to sandbox
+      clientId: process.env.EPIC_CLIENT_ID,
+      accessToken: process.env.EPIC_ACCESS_TOKEN
+    });
+
     // Initialize MCP server
     this.server = new Server(
       {
-        name: 'medical-mcp-server',
+        name: 'medical-mcp-server-with-epic',
         version: '1.0.0',
-        description: 'Medical MCP Server with Local HuggingFace embeddings, document processing, NER, and vector search capabilities'
+        description: 'Medical MCP Server with Epic FHIR integration, document processing, NER, and vector search capabilities'
       },
       {
         capabilities: {
@@ -107,96 +110,89 @@ export class MedicalMCPServer {
   }
 
   private setupHandlers(): void {
-    // List available tools
+    // List available tools (including Epic FHIR tools)
     this.server.setRequestHandler(ListToolsRequestSchema, async () => {
       const documentToolsList = this.documentTools.getAllTools();
       const medicalToolsList = this.medicalTools.getAllTools();
       const localEmbeddingToolsList = this.localEmbeddingTools.getAllTools();
+      const epicFHIRToolsList = this.epicFHIRTools.getAllTools(); // NEW
       
       return {
         tools: [
           ...documentToolsList,
           ...medicalToolsList,
-          ...localEmbeddingToolsList
+          ...localEmbeddingToolsList,
+          ...epicFHIRToolsList // NEW: Epic FHIR tools
         ],
       };
     });
 
-    // Handle tool calls
+    // Handle tool calls (including Epic FHIR tools)
     this.server.setRequestHandler(CallToolRequestSchema, async (request) => {
       const { name, arguments: args } = request.params;
 
       try {
-        // ADD DEBUG LINE
         console.log(`🔧 TOOL CALLED: "${name}" with args:`, JSON.stringify(args, null, 2));
         
         switch (name) {
-          // Document tools
+          // Existing document tools
           case 'uploadDocument':
-            console.log(`📤 Routing to DocumentTools.handleUploadDocument`);
             return await this.documentTools.handleUploadDocument(args as any || {});
-
           case 'searchDocuments':
-            console.log(`🔍 Routing to DocumentTools.handleSearchDocuments`);
             return await this.documentTools.handleSearchDocuments(args as any || {});
-
           case 'listDocuments':
-            console.log(`📋 Routing to DocumentTools.handleListDocuments`);
             return await this.documentTools.handleListDocuments(args as any || {});
 
-          // Medical tools
+          // Existing medical tools
           case 'extractMedicalEntities':
-            console.log(`🏷️ Routing to MedicalTools.handleExtractMedicalEntities`);
             return await this.medicalTools.handleExtractMedicalEntities(args as any || {});
-
           case 'findSimilarCases':
-            console.log(`🔗 Routing to MedicalTools.handleFindSimilarCases`);
             return await this.medicalTools.handleFindSimilarCases(args as any || {});
-
           case 'analyzePatientHistory':
-            console.log(`📈 Routing to MedicalTools.handleAnalyzePatientHistory`);
             return await this.medicalTools.handleAnalyzePatientHistory(args as any || {});
-
           case 'getMedicalInsights':
-            console.log(`💡 Routing to MedicalTools.handleMedicalInsights`);
             return await this.medicalTools.handleMedicalInsights(args as any || {});
 
-          // Local embedding tools
+          // Existing local embedding tools
           case 'generateEmbeddingLocal':
-            console.log(`🧠 Routing to LocalEmbeddingTools.handleGenerateEmbedding`);
             return await this.localEmbeddingTools.handleGenerateEmbedding(args as any || {});
-
           case 'chunkAndEmbedDocument':
-            console.log(`📄 Routing to LocalEmbeddingTools.handleChunkAndEmbed`);
             return await this.localEmbeddingTools.handleChunkAndEmbed(args as any || {});
-
           case 'semanticSearchLocal':
-            console.log(`🔍 Routing to LocalEmbeddingTools.handleSemanticSearch`);
             return await this.localEmbeddingTools.handleSemanticSearch(args as any || {});
 
-          // Legacy tool names for backward compatibility
+          // NEW: Epic FHIR tools
+          case 'searchPatients':
+            console.log(`🏥 Routing to Epic FHIR searchPatients`);
+            return await this.epicFHIRTools.handleSearchPatients(args as any || {});
+          case 'getPatientDetails':
+            console.log(`🏥 Routing to Epic FHIR getPatientDetails`);
+            return await this.epicFHIRTools.handleGetPatient(args as any || {});
+          case 'getPatientObservations':
+            console.log(`🏥 Routing to Epic FHIR getPatientObservations`);
+            return await this.epicFHIRTools.handleGetObservations(args as any || {});
+          case 'getPatientMedications':
+            console.log(`🏥 Routing to Epic FHIR getPatientMedications`);
+            return await this.epicFHIRTools.handleGetMedications(args as any || {});
+          case 'getPatientConditions':
+            console.log(`🏥 Routing to Epic FHIR getPatientConditions`);
+            return await this.epicFHIRTools.handleGetConditions(args as any || {});
+          case 'getPatientEncounters':
+            console.log(`🏥 Routing to Epic FHIR getPatientEncounters`);
+            return await this.epicFHIRTools.handleGetEncounters(args as any || {});
+
+          // Legacy compatibility
           case 'upload_document':
-            console.log(`📤 Routing to uploadDocument (legacy)`);
             return await this.documentTools.handleUploadDocument(args as any || {});
-
           case 'extract_text':
-            console.log(`📝 Routing to handleExtractText (legacy)`);
             return await this.handleExtractText(args || {});
-
           case 'extract_medical_entities':
-            console.log(`🏷️ Routing to extractMedicalEntities (legacy)`);
             return await this.medicalTools.handleExtractMedicalEntities(args as any || {});
-
           case 'search_by_diagnosis':
-            console.log(`🔍 Routing to handleSearchByDiagnosis (legacy)`);
             return await this.handleSearchByDiagnosis(args || {});
-
           case 'semantic_search':
-            console.log(`🔍 Routing to handleSemanticSearch (legacy)`);
             return await this.handleSemanticSearch(args || {});
-
           case 'get_patient_summary':
-            console.log(`📊 Routing to handleGetPatientSummary (legacy)`);
             return await this.handleGetPatientSummary(args || {});
 
           default:
@@ -224,63 +220,52 @@ export class MedicalMCPServer {
   }
 
   // Handle tool calls for HTTP mode
-// Replace the handleToolCall method in your src/server.ts
-
-private async handleToolCall(name: string, args: any): Promise<any> {
+  private async handleToolCall(name: string, args: any): Promise<any> {
     try {
-      // ADD DEBUG LOGGING FOR HTTP MODE
       console.log(`🔧 HTTP TOOL CALLED: "${name}" with args:`, JSON.stringify(args, null, 2));
       
       switch (name) {
         // Document tools
         case 'uploadDocument':
-          console.log(`📤 HTTP Routing to DocumentTools.handleUploadDocument`);
           return await this.documentTools.handleUploadDocument(args as any || {});
         case 'searchDocuments':
-          console.log(`🔍 HTTP Routing to DocumentTools.handleSearchDocuments`);
           return await this.documentTools.handleSearchDocuments(args as any || {});
         case 'listDocuments':
-          console.log(`📋 HTTP Routing to DocumentTools.handleListDocuments`);
           return await this.documentTools.handleListDocuments(args as any || {});
-  
+
         // Medical tools
         case 'extractMedicalEntities':
-          console.log(`🏷️ HTTP Routing to MedicalTools.handleExtractMedicalEntities`);
           return await this.medicalTools.handleExtractMedicalEntities(args as any || {});
         case 'findSimilarCases':
-          console.log(`🔗 HTTP Routing to MedicalTools.handleFindSimilarCases`);
           return await this.medicalTools.handleFindSimilarCases(args as any || {});
         case 'analyzePatientHistory':
-          console.log(`📈 HTTP Routing to MedicalTools.handleAnalyzePatientHistory`);
           return await this.medicalTools.handleAnalyzePatientHistory(args as any || {});
         case 'getMedicalInsights':
-          console.log(`💡 HTTP Routing to MedicalTools.handleMedicalInsights`);
           return await this.medicalTools.handleMedicalInsights(args as any || {});
-  
-        // Local embedding tools (these were incorrectly labeled as Google)
+
+        // Local embedding tools
         case 'generateEmbeddingLocal':
-          console.log(`🧠 HTTP Routing to LocalEmbeddingTools.handleGenerateEmbedding`);
           return await this.localEmbeddingTools.handleGenerateEmbedding(args as any || {});
         case 'chunkAndEmbedDocument':
-          console.log(`📄 HTTP Routing to LocalEmbeddingTools.handleChunkAndEmbed`);
           return await this.localEmbeddingTools.handleChunkAndEmbed(args as any || {});
         case 'semanticSearchLocal':
-          console.log(`🔍 HTTP Routing to LocalEmbeddingTools.handleSemanticSearch`);
           return await this.localEmbeddingTools.handleSemanticSearch(args as any || {});
-  
-        // Legacy compatibility
-        case 'generateEmbeddingGoogle':
-          console.log(`🧠 HTTP Routing to LocalEmbeddingTools.handleGenerateEmbedding (legacy)`);
-          return await this.localEmbeddingTools.handleGenerateEmbedding(args as any || {});
-        case 'semanticSearchGoogle':
-          console.log(`🔍 HTTP Routing to LocalEmbeddingTools.handleSemanticSearch (legacy)`);
-          return await this.localEmbeddingTools.handleSemanticSearch(args as any || {});
-        case 'hybridSearch':
-          console.log(`🔄 HTTP Routing to LocalEmbeddingTools.handleHybridSearch (legacy)`);
-          return await this.localEmbeddingTools.handleSemanticSearch(args as any || {}); // Note: using semantic search as fallback
-  
+
+        // Epic FHIR tools
+        case 'searchPatients':
+          return await this.epicFHIRTools.handleSearchPatients(args as any || {});
+        case 'getPatientDetails':
+          return await this.epicFHIRTools.handleGetPatient(args as any || {});
+        case 'getPatientObservations':
+          return await this.epicFHIRTools.handleGetObservations(args as any || {});
+        case 'getPatientMedications':
+          return await this.epicFHIRTools.handleGetMedications(args as any || {});
+        case 'getPatientConditions':
+          return await this.epicFHIRTools.handleGetConditions(args as any || {});
+        case 'getPatientEncounters':
+          return await this.epicFHIRTools.handleGetEncounters(args as any || {});
+
         default:
-          console.log(`❌ HTTP UNKNOWN TOOL: "${name}"`);
           throw new Error(`Unknown tool: ${name}`);
       }
     } catch (error) {
@@ -353,43 +338,30 @@ private async handleToolCall(name: string, args: any): Promise<any> {
   async start(): Promise<void> {
     try {
       if (isHttpMode) {
-        logger.log('🏥 Medical MCP Server v1.0.0 (HTTP Mode with Google Gemini Embeddings)');
-        logger.log('==========================================');
+        logger.log('🏥 Medical MCP Server v1.0.0 (HTTP Mode with Epic FHIR Integration)');
+        logger.log('===============================================');
       } else if (isStdioMode) {
-        logger.error('Starting Medical MCP Server in stdio mode...');
+        logger.error('Starting Medical MCP Server with Epic FHIR integration...');
       } else {
-        logger.log('🏥 Medical MCP Server v1.0.0 (Google Gemini Embeddings)');
-        logger.log('=====================================');
-        logger.log('Starting Medical MCP Server...');
+        logger.log('🏥 Medical MCP Server v1.0.0 (Epic FHIR Integration)');
+        logger.log('============================================');
+        logger.log('Starting Medical MCP Server with Epic FHIR...');
       }
       
       // Connect to MongoDB
       await this.mongoClient.connect();
-      if (isStdioMode) {
-        logger.error('MongoDB connected successfully');
-      } else {
-        logger.log('✓ MongoDB connection established');
-      }
+      logger.log('✓ MongoDB connection established');
 
-      // Initialize Google embedding service
+      // Initialize Local embedding service
       await this.localEmbeddingService.initialize();
-      if (isStdioMode) {
-        logger.error('Google Embedding service initialized successfully');
-      } else {
-        logger.log('✓ Google Embedding service initialized (Gemini)');
-      }
+      logger.log('✓ Local Embedding service initialized');
 
       // Initialize OCR service
       await this.ocrService.initialize();
-      if (isStdioMode) {
-        logger.error('OCR service initialized successfully');
-      } else {
-        logger.log('✓ OCR service initialized');
-      }
+      logger.log('✓ OCR service initialized');
 
       // Start the MCP server
       if (isHttpMode) {
-        // HTTP mode setup
         const express = await import('express');
         const cors = await import('cors');
         
@@ -401,9 +373,9 @@ private async handleToolCall(name: string, args: any): Promise<any> {
         app.get('/health', (req, res) => {
           res.json({
             status: 'healthy',
-            server: 'medical-mcp-server',
+            server: 'medical-mcp-server-with-epic',
             version: '1.0.0',
-            embeddingService: 'Google Gemini',
+            features: ['document-processing', 'medical-ner', 'vector-search', 'epic-fhir'],
             timestamp: new Date().toISOString()
           });
         });
@@ -411,14 +383,10 @@ private async handleToolCall(name: string, args: any): Promise<any> {
         // MCP endpoint
         app.post('/mcp', async (req, res) => {
           try {
-            // Handle MCP requests via HTTP
-            console.log(`📨 HTTP REQUEST: ${req.body.method} - ${JSON.stringify(req.body, null, 2)}`);
             const request = req.body;
             
-            // Set appropriate headers for Streamable HTTP
             res.setHeader('Content-Type', 'application/json');
             
-            // Generate session ID if not present
             let sessionId = req.headers['mcp-session-id'] as string;
             if (!sessionId && request.method === 'initialize') {
               sessionId = `session-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
@@ -426,7 +394,6 @@ private async handleToolCall(name: string, args: any): Promise<any> {
               logger.log('📋 New session initialized:', sessionId);
             }
 
-            // Process the MCP request
             if (request.method === 'initialize') {
               res.json({
                 jsonrpc: '2.0',
@@ -436,40 +403,26 @@ private async handleToolCall(name: string, args: any): Promise<any> {
                     tools: {}
                   },
                   serverInfo: {
-                    name: 'medical-mcp-server',
+                    name: 'medical-mcp-server-with-epic',
                     version: '1.0.0'
                   }
                 },
                 id: request.id
               });
             } else if (request.method === 'tools/list') {
-              const listResult = await this.server.setRequestHandler(ListToolsRequestSchema, async () => {
-                const documentTools = this.documentTools.getAllTools();
-                const medicalTools = this.medicalTools.getAllTools();
-                const googleEmbeddingTools = this.localEmbeddingTools.getAllTools();
-                
-                return {
-                  tools: [
-                    ...documentTools,
-                    ...medicalTools,
-                    ...googleEmbeddingTools
-                  ],
-                };
-              });
-              
               res.json({
                 jsonrpc: '2.0',
                 result: {
                   tools: [
                     ...this.documentTools.getAllTools(),
                     ...this.medicalTools.getAllTools(),
-                    ...this.localEmbeddingTools.getAllTools()
+                    ...this.localEmbeddingTools.getAllTools(),
+                    ...this.epicFHIRTools.getAllTools()
                   ]
                 },
                 id: request.id
               });
             } else if (request.method === 'tools/call') {
-              // Handle tool calls manually
               const toolResult = await this.handleToolCall(request.params.name, request.params.arguments);
               
               res.json({
@@ -502,7 +455,7 @@ private async handleToolCall(name: string, args: any): Promise<any> {
 
         const port = process.env.MCP_HTTP_PORT || 3001;
         app.listen(port, () => {
-          logger.log(`🚀 HTTP Server is ready to accept connections`);
+          logger.log(`🚀 HTTP Server ready with Epic FHIR integration`);
           logger.log(`📊 Server Information:`);
           logger.log(`======================`);
           logger.log(`✓ HTTP Server listening on port ${port}`);
@@ -512,12 +465,11 @@ private async handleToolCall(name: string, args: any): Promise<any> {
           this.logServerInfo();
         });
       } else {
-        // Stdio mode
         const transport = new StdioServerTransport();
         await this.server.connect(transport);
         
         if (isStdioMode) {
-          logger.error('Medical MCP Server running on stdio transport');
+          logger.error('Medical MCP Server with Epic FHIR running on stdio transport');
           logger.error('Ready to accept commands');
         } else {
           logger.log('✓ Medical MCP Server started successfully');
@@ -537,7 +489,7 @@ private async handleToolCall(name: string, args: any): Promise<any> {
       const stats = await this.getStatistics();
       logger.log(`📄 Documents in database: ${stats.documentsCount}`);
       logger.log(`🔧 Tools available: ${stats.toolsAvailable}`);
-      logger.log(`🤖 Embedding model: ${stats.embeddingModel} (Google Gemini)`);
+      logger.log(`🤖 Embedding model: ${stats.embeddingModel}`);
       logger.log(`⏱️  Server uptime: ${Math.round(stats.uptime)}s`);
       
       logger.log('\n📝 Available tools:');
@@ -548,10 +500,16 @@ private async handleToolCall(name: string, args: any): Promise<any> {
       logger.log('   🔗 findSimilarCases - Find similar medical cases');
       logger.log('   📈 analyzePatientHistory - Analyze patient medical history');
       logger.log('   💡 getMedicalInsights - Get medical insights and recommendations');
-      logger.log('   🧠 generateEmbeddingGoogle - Generate embeddings with Google Gemini');
+      logger.log('   🧠 generateEmbeddingLocal - Generate embeddings locally');
       logger.log('   📄 chunkAndEmbedDocument - Chunk and embed large documents');
-      logger.log('   🔍 semanticSearchGoogle - Search using Google embeddings');
-      logger.log('   🔄 hybridSearch - Combined vector and text search');
+      logger.log('   🔍 semanticSearchLocal - Search using local embeddings');
+      logger.log('\n🏥 Epic FHIR tools:');
+      logger.log('   👥 searchPatients - Search patients in Epic EHR');
+      logger.log('   👤 getPatientDetails - Get detailed patient information');
+      logger.log('   🧪 getPatientObservations - Get lab results and vitals');
+      logger.log('   💊 getPatientMedications - Get patient medications');
+      logger.log('   🩺 getPatientConditions - Get patient diagnoses/conditions');
+      logger.log('   🏨 getPatientEncounters - Get patient visits/encounters');
       
       logger.log('\n💬 The server is now listening for MCP client connections...');
     } catch (error) {
@@ -571,7 +529,6 @@ private async handleToolCall(name: string, args: any): Promise<any> {
 
   private async cleanup(): Promise<void> {
     try {
-      // Cleanup services
       await this.mongoClient.disconnect();
       await this.ocrService.terminate();
       await this.localEmbeddingService.shutdown();
@@ -582,7 +539,6 @@ private async handleToolCall(name: string, args: any): Promise<any> {
     }
   }
 
-  // Health check method
   async healthCheck(): Promise<{
     status: 'healthy' | 'unhealthy';
     services: Record<string, boolean>;
@@ -592,7 +548,6 @@ private async handleToolCall(name: string, args: any): Promise<any> {
     let allHealthy = true;
 
     try {
-      // Check MongoDB connection
       await this.mongoClient.countDocuments();
       services.mongodb = true;
     } catch {
@@ -600,12 +555,13 @@ private async handleToolCall(name: string, args: any): Promise<any> {
       allHealthy = false;
     }
 
-    services.googleEmbedding = this.localEmbeddingService.isReady();
-    if (!services.googleEmbedding) allHealthy = false;
+    services.localEmbedding = this.localEmbeddingService.isReady();
+    if (!services.localEmbedding) allHealthy = false;
 
-    services.ner = true; // NER service is always available
+    services.ner = true;
     services.ocr = this.ocrService ? true : false;
-    services.pdf = true; // PDF service is always available
+    services.pdf = true;
+    services.epicFHIR = true; // Epic FHIR is always available (sandbox mode)
 
     return {
       status: allHealthy ? 'healthy' : 'unhealthy',
@@ -614,7 +570,6 @@ private async handleToolCall(name: string, args: any): Promise<any> {
     };
   }
 
-  // Get server statistics
   async getStatistics(): Promise<{
     documentsCount: number;
     toolsAvailable: number;
@@ -625,12 +580,13 @@ private async handleToolCall(name: string, args: any): Promise<any> {
       const documentsCount = await this.mongoClient.countDocuments();
       const documentTools = this.documentTools.getAllTools();
       const medicalTools = this.medicalTools.getAllTools();
-      const googleEmbeddingTools = this.localEmbeddingTools.getAllTools();
+      const localEmbeddingTools = this.localEmbeddingTools.getAllTools();
+      const epicFHIRTools = this.epicFHIRTools.getAllTools();
       const embeddingModel = this.localEmbeddingService.getModelInfo();
 
       return {
         documentsCount,
-        toolsAvailable: documentTools.length + medicalTools.length + googleEmbeddingTools.length,
+        toolsAvailable: documentTools.length + medicalTools.length + localEmbeddingTools.length + epicFHIRTools.length,
         embeddingModel: embeddingModel.model,
         uptime: process.uptime()
       };

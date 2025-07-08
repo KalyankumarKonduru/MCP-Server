@@ -8,6 +8,7 @@ export declare class MedicalMCPServer {
     private documentTools;
     private medicalTools;
     private localEmbeddingTools;
+    private epicFHIRTools;
     constructor();
     private setupHandlers;
     private handleToolCall;
