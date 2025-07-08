@@ -15,10 +15,12 @@ export declare class EpicFHIRTools {
         identifier?: string;
         gender?: string;
     }): Promise<any>;
+    private searchKnownPatients;
     createGetPatientTool(): Tool;
     handleGetPatient(args: {
         patientId: string;
     }): Promise<any>;
+    private getKnownPatientById;
     createGetObservationsTool(): Tool;
     handleGetObservations(args: {
         patientId: string;
@@ -27,12 +29,14 @@ export declare class EpicFHIRTools {
         date?: string;
         limit?: number;
     }): Promise<any>;
+    private getMockObservations;
     createGetMedicationsTool(): Tool;
     handleGetMedications(args: {
         patientId: string;
         status?: string;
         limit?: number;
     }): Promise<any>;
+    private getMockMedications;
     createGetConditionsTool(): Tool;
     handleGetConditions(args: {
         patientId: string;
@@ -40,6 +44,7 @@ export declare class EpicFHIRTools {
         category?: string;
         limit?: number;
     }): Promise<any>;
+    private getMockConditions;
     createGetEncountersTool(): Tool;
     handleGetEncounters(args: {
         patientId: string;
@@ -48,6 +53,8 @@ export declare class EpicFHIRTools {
         date?: string;
         limit?: number;
     }): Promise<any>;
+    private getMockEncounters;
+    private isKnownPatientId;
     private makeRequest;
     private formatPatientName;
     private extractPhone;
