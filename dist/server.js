@@ -17,7 +17,6 @@ const pdf_service_js_1 = require("./services/pdf-service.js");
 const document_tools_js_1 = require("./tools/document-tools.js");
 const medical_tools_js_1 = require("./tools/medical-tools.js");
 const local_embedding_tools_js_1 = require("./tools/local-embedding-tools.js");
-const epic_fhir_tools_js_1 = require("./tools/epic-fhir-tools.js");
 // Load environment variables
 dotenv_1.default.config();
 const isStdioMode = process.argv.includes('--stdio') ||
@@ -47,7 +46,6 @@ class MedicalMCPServer {
     documentTools;
     medicalTools;
     localEmbeddingTools;
-    epicFHIRTools; // NEW: Epic FHIR integration
     constructor() {
         // Validate required environment variables
         const mongoConnectionString = process.env.MONGODB_CONNECTION_STRING;
@@ -66,12 +64,6 @@ class MedicalMCPServer {
         this.medicalTools = new medical_tools_js_1.MedicalTools(this.mongoClient, this.nerService, this.localEmbeddingService);
         this.localEmbeddingTools = new local_embedding_tools_js_1.LocalEmbeddingTools(this.mongoClient);
         // NEW: Initialize Epic FHIR tools
-        this.epicFHIRTools = new epic_fhir_tools_js_1.EpicFHIRTools({
-            baseUrl: process.env.EPIC_FHIR_BASE_URL || 'https://fhir.epic.com/interconnect-fhir-oauth/api/FHIR/R4',
-            useSandbox: process.env.EPIC_USE_SANDBOX !== 'false', // Default to sandbox
-            clientId: process.env.EPIC_CLIENT_ID,
-            accessToken: process.env.EPIC_ACCESS_TOKEN
-        });
         // Initialize MCP server
         this.server = new index_js_1.Server({
             name: 'medical-mcp-server-with-epic',
@@ -90,13 +82,11 @@ class MedicalMCPServer {
             const documentToolsList = this.documentTools.getAllTools();
             const medicalToolsList = this.medicalTools.getAllTools();
             const localEmbeddingToolsList = this.localEmbeddingTools.getAllTools();
-            const epicFHIRToolsList = this.epicFHIRTools.getAllTools(); // NEW
             return {
                 tools: [
                     ...documentToolsList,
                     ...medicalToolsList,
                     ...localEmbeddingToolsList,
-                    ...epicFHIRToolsList // NEW: Epic FHIR tools
                 ],
             };
         });
@@ -129,25 +119,6 @@ class MedicalMCPServer {
                         return await this.localEmbeddingTools.handleChunkAndEmbed(args || {});
                     case 'semanticSearchLocal':
                         return await this.localEmbeddingTools.handleSemanticSearch(args || {});
-                    // NEW: Epic FHIR tools
-                    case 'searchPatients':
-                        console.log(`🏥 Routing to Epic FHIR searchPatients`);
-                        return await this.epicFHIRTools.handleSearchPatients(args || {});
-                    case 'getPatientDetails':
-                        console.log(`🏥 Routing to Epic FHIR getPatientDetails`);
-                        return await this.epicFHIRTools.handleGetPatient(args || {});
-                    case 'getPatientObservations':
-                        console.log(`🏥 Routing to Epic FHIR getPatientObservations`);
-                        return await this.epicFHIRTools.handleGetObservations(args || {});
-                    case 'getPatientMedications':
-                        console.log(`🏥 Routing to Epic FHIR getPatientMedications`);
-                        return await this.epicFHIRTools.handleGetMedications(args || {});
-                    case 'getPatientConditions':
-                        console.log(`🏥 Routing to Epic FHIR getPatientConditions`);
-                        return await this.epicFHIRTools.handleGetConditions(args || {});
-                    case 'getPatientEncounters':
-                        console.log(`🏥 Routing to Epic FHIR getPatientEncounters`);
-                        return await this.epicFHIRTools.handleGetEncounters(args || {});
                     // Legacy compatibility
                     case 'upload_document':
                         return await this.documentTools.handleUploadDocument(args || {});
@@ -213,19 +184,6 @@ class MedicalMCPServer {
                     return await this.localEmbeddingTools.handleChunkAndEmbed(args || {});
                 case 'semanticSearchLocal':
                     return await this.localEmbeddingTools.handleSemanticSearch(args || {});
-                // Epic FHIR tools
-                case 'searchPatients':
-                    return await this.epicFHIRTools.handleSearchPatients(args || {});
-                case 'getPatientDetails':
-                    return await this.epicFHIRTools.handleGetPatient(args || {});
-                case 'getPatientObservations':
-                    return await this.epicFHIRTools.handleGetObservations(args || {});
-                case 'getPatientMedications':
-                    return await this.epicFHIRTools.handleGetMedications(args || {});
-                case 'getPatientConditions':
-                    return await this.epicFHIRTools.handleGetConditions(args || {});
-                case 'getPatientEncounters':
-                    return await this.epicFHIRTools.handleGetEncounters(args || {});
                 default:
                     throw new Error(`Unknown tool: ${name}`);
             }
@@ -367,7 +325,6 @@ class MedicalMCPServer {
                                         ...this.documentTools.getAllTools(),
                                         ...this.medicalTools.getAllTools(),
                                         ...this.localEmbeddingTools.getAllTools(),
-                                        ...this.epicFHIRTools.getAllTools()
                                     ]
                                 },
                                 id: request.id
@@ -516,11 +473,10 @@ class MedicalMCPServer {
             const documentTools = this.documentTools.getAllTools();
             const medicalTools = this.medicalTools.getAllTools();
             const localEmbeddingTools = this.localEmbeddingTools.getAllTools();
-            const epicFHIRTools = this.epicFHIRTools.getAllTools();
             const embeddingModel = this.localEmbeddingService.getModelInfo();
             return {
                 documentsCount,
-                toolsAvailable: documentTools.length + medicalTools.length + localEmbeddingTools.length + epicFHIRTools.length,
+                toolsAvailable: documentTools.length + medicalTools.length + localEmbeddingTools.length,
                 embeddingModel: embeddingModel.model,
                 uptime: process.uptime()
             };
