@@ -1,15 +1,12 @@
-"use strict";
 // src/tools/local-embedding-tools.ts
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.LocalEmbeddingTools = void 0;
-const transformers_1 = require("@xenova/transformers");
+import { pipeline } from '@xenova/transformers';
 // Global model instances (loaded once)
 let embedder;
 // Load the embedding model once
 async function loadEmbedder() {
     if (!embedder) {
         console.log('🧠 Loading local transformer model (all-MiniLM-L6-v2)...');
-        embedder = await (0, transformers_1.pipeline)("feature-extraction", "Xenova/all-MiniLM-L6-v2");
+        embedder = await pipeline("feature-extraction", "Xenova/all-MiniLM-L6-v2");
         console.log('✅ Local embedding model loaded successfully');
     }
     return embedder;
@@ -26,7 +23,7 @@ function chunkText(text, chunkSize = 500, overlap = 100) {
     }
     return chunks;
 }
-class LocalEmbeddingTools {
+export class LocalEmbeddingTools {
     mongoClient;
     constructor(mongoClient) {
         this.mongoClient = mongoClient;
@@ -383,5 +380,4 @@ class LocalEmbeddingTools {
         ];
     }
 }
-exports.LocalEmbeddingTools = LocalEmbeddingTools;
 //# sourceMappingURL=local-embedding-tools.js.map

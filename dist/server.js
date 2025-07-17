@@ -1,24 +1,18 @@
-"use strict";
-var __importDefault = (this && this.__importDefault) || function (mod) {
-    return (mod && mod.__esModule) ? mod : { "default": mod };
-};
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.MedicalMCPServer = void 0;
 // src/server.ts - Updated with Epic FHIR Integration
-const index_js_1 = require("@modelcontextprotocol/sdk/server/index.js");
-const stdio_js_1 = require("@modelcontextprotocol/sdk/server/stdio.js");
-const types_js_1 = require("@modelcontextprotocol/sdk/types.js");
-const dotenv_1 = __importDefault(require("dotenv"));
-const mongodb_client_js_1 = require("./db/mongodb-client.js");
-const local_embedding_service_js_1 = require("./services/local-embedding-service.js");
-const medical_ner_service_js_1 = require("./services/medical-ner-service.js");
-const ocr_service_js_1 = require("./services/ocr-service.js");
-const pdf_service_js_1 = require("./services/pdf-service.js");
-const document_tools_js_1 = require("./tools/document-tools.js");
-const medical_tools_js_1 = require("./tools/medical-tools.js");
-const local_embedding_tools_js_1 = require("./tools/local-embedding-tools.js");
+import { Server } from '@modelcontextprotocol/sdk/server/index.js';
+import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
+import { CallToolRequestSchema, ListToolsRequestSchema, } from '@modelcontextprotocol/sdk/types.js';
+import dotenv from 'dotenv';
+import { MongoDBClient } from './db/mongodb-client.js';
+import { LocalEmbeddingService } from './services/local-embedding-service.js';
+import { MedicalNERService } from './services/medical-ner-service.js';
+import { OCRService } from './services/ocr-service.js';
+import { PDFService } from './services/pdf-service.js';
+import { DocumentTools } from './tools/document-tools.js';
+import { MedicalTools } from './tools/medical-tools.js';
+import { LocalEmbeddingTools } from './tools/local-embedding-tools.js';
 // Load environment variables
-dotenv_1.default.config();
+dotenv.config();
 const isStdioMode = process.argv.includes('--stdio') ||
     process.stdin.isTTY === false ||
     process.env.MCP_STDIO_MODE === 'true';
@@ -36,7 +30,7 @@ const logger = {
         console.error(...args);
     }
 };
-class MedicalMCPServer {
+export class MedicalMCPServer {
     server;
     mongoClient;
     localEmbeddingService;
@@ -54,18 +48,18 @@ class MedicalMCPServer {
             throw new Error('MONGODB_CONNECTION_STRING environment variable is required');
         }
         // Initialize services
-        this.mongoClient = new mongodb_client_js_1.MongoDBClient(mongoConnectionString, dbName);
-        this.localEmbeddingService = new local_embedding_service_js_1.LocalEmbeddingService();
-        this.nerService = new medical_ner_service_js_1.MedicalNERService();
-        this.ocrService = new ocr_service_js_1.OCRService();
-        this.pdfService = new pdf_service_js_1.PDFService();
+        this.mongoClient = new MongoDBClient(mongoConnectionString, dbName);
+        this.localEmbeddingService = new LocalEmbeddingService();
+        this.nerService = new MedicalNERService();
+        this.ocrService = new OCRService();
+        this.pdfService = new PDFService();
         // Initialize existing tools
-        this.documentTools = new document_tools_js_1.DocumentTools(this.mongoClient, this.localEmbeddingService, this.nerService, this.ocrService, this.pdfService);
-        this.medicalTools = new medical_tools_js_1.MedicalTools(this.mongoClient, this.nerService, this.localEmbeddingService);
-        this.localEmbeddingTools = new local_embedding_tools_js_1.LocalEmbeddingTools(this.mongoClient);
+        this.documentTools = new DocumentTools(this.mongoClient, this.localEmbeddingService, this.nerService, this.ocrService, this.pdfService);
+        this.medicalTools = new MedicalTools(this.mongoClient, this.nerService, this.localEmbeddingService);
+        this.localEmbeddingTools = new LocalEmbeddingTools(this.mongoClient);
         // NEW: Initialize Epic FHIR tools
         // Initialize MCP server
-        this.server = new index_js_1.Server({
+        this.server = new Server({
             name: 'medical-mcp-server-with-epic',
             version: '1.0.0',
             description: 'Medical MCP Server with Epic FHIR integration, document processing, NER, and vector search capabilities'
@@ -78,7 +72,7 @@ class MedicalMCPServer {
     }
     setupHandlers() {
         // List available tools (including Epic FHIR tools)
-        this.server.setRequestHandler(types_js_1.ListToolsRequestSchema, async () => {
+        this.server.setRequestHandler(ListToolsRequestSchema, async () => {
             const documentToolsList = this.documentTools.getAllTools();
             const medicalToolsList = this.medicalTools.getAllTools();
             const localEmbeddingToolsList = this.localEmbeddingTools.getAllTools();
@@ -91,7 +85,7 @@ class MedicalMCPServer {
             };
         });
         // Handle tool calls (including Epic FHIR tools)
-        this.server.setRequestHandler(types_js_1.CallToolRequestSchema, async (request) => {
+        this.server.setRequestHandler(CallToolRequestSchema, async (request) => {
             const { name, arguments: args } = request.params;
             try {
                 console.log(`🔧 TOOL CALLED: "${name}" with args:`, JSON.stringify(args, null, 2));
@@ -373,7 +367,7 @@ class MedicalMCPServer {
                 });
             }
             else {
-                const transport = new stdio_js_1.StdioServerTransport();
+                const transport = new StdioServerTransport();
                 await this.server.connect(transport);
                 if (isStdioMode) {
                     logger.error('Medical MCP Server with Epic FHIR running on stdio transport');
@@ -409,13 +403,6 @@ class MedicalMCPServer {
             logger.log('   🧠 generateEmbeddingLocal - Generate embeddings locally');
             logger.log('   📄 chunkAndEmbedDocument - Chunk and embed large documents');
             logger.log('   🔍 semanticSearchLocal - Search using local embeddings');
-            logger.log('\n🏥 Epic FHIR tools:');
-            logger.log('   👥 searchPatients - Search patients in Epic EHR');
-            logger.log('   👤 getPatientDetails - Get detailed patient information');
-            logger.log('   🧪 getPatientObservations - Get lab results and vitals');
-            logger.log('   💊 getPatientMedications - Get patient medications');
-            logger.log('   🩺 getPatientConditions - Get patient diagnoses/conditions');
-            logger.log('   🏨 getPatientEncounters - Get patient visits/encounters');
             logger.log('\n💬 The server is now listening for MCP client connections...');
         }
         catch (error) {
@@ -487,7 +474,6 @@ class MedicalMCPServer {
         }
     }
 }
-exports.MedicalMCPServer = MedicalMCPServer;
 // Handle graceful shutdown
 process.on('SIGINT', async () => {
     logger.error('Received SIGINT, shutting down gracefully...');

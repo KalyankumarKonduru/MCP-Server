@@ -1,9 +1,6 @@
-"use strict";
 // src/services/local-embedding-service.ts
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.LocalEmbeddingService = void 0;
-const transformers_1 = require("@xenova/transformers");
-class LocalEmbeddingService {
+import { pipeline } from '@xenova/transformers';
+export class LocalEmbeddingService {
     embedder = null;
     isLoading = false;
     model;
@@ -16,7 +13,7 @@ class LocalEmbeddingService {
         this.isLoading = true;
         try {
             console.log(`🧠 Loading local embedding model: ${this.model}...`);
-            this.embedder = await (0, transformers_1.pipeline)("feature-extraction", this.model);
+            this.embedder = await pipeline("feature-extraction", this.model);
             console.log(`✅ Local embedding model loaded successfully`);
         }
         catch (error) {
@@ -160,5 +157,4 @@ class LocalEmbeddingService {
         console.log('Local embedding service shut down');
     }
 }
-exports.LocalEmbeddingService = LocalEmbeddingService;
 //# sourceMappingURL=local-embedding-service.js.map

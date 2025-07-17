@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "description": "MCP server for medical document processing with local embeddings",
   "main": "dist/index.js",
+  "type": "module",
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "build": "tsc",

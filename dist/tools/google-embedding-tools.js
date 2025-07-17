@@ -1,7 +1,4 @@
-"use strict";
 // src/tools/google-embedding-tools.ts
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.GoogleEmbeddingTools = void 0;
 // Chunking utility function
 function chunkText(text, chunkSize = 500, overlap = 100) {
     const words = text.split(/\s+/);
@@ -14,7 +11,7 @@ function chunkText(text, chunkSize = 500, overlap = 100) {
     }
     return chunks;
 }
-class GoogleEmbeddingTools {
+export class GoogleEmbeddingTools {
     mongoClient;
     embeddingService;
     constructor(mongoClient, embeddingService) {
@@ -478,5 +475,4 @@ class GoogleEmbeddingTools {
         ];
     }
 }
-exports.GoogleEmbeddingTools = GoogleEmbeddingTools;
 //# sourceMappingURL=google-embedding-tools.js.map

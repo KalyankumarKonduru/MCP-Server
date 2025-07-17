@@ -1,10 +1,7 @@
-"use strict";
 // src/services/embedding-service.ts
 // This file is replaced by local-embedding-service.ts
 // Keeping this as a stub to prevent import errors
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.EmbeddingService = void 0;
-class EmbeddingService {
+export class EmbeddingService {
     constructor(apiKey, model) {
         console.warn('⚠️  EmbeddingService is deprecated. Use LocalEmbeddingService instead.');
     }
@@ -33,5 +30,4 @@ class EmbeddingService {
         };
     }
 }
-exports.EmbeddingService = EmbeddingService;
 //# sourceMappingURL=embedding-service.js.map

@@ -1,11 +1,5 @@
-"use strict";
-var __importDefault = (this && this.__importDefault) || function (mod) {
-    return (mod && mod.__esModule) ? mod : { "default": mod };
-};
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.MedicalNERService = void 0;
-const compromise_1 = __importDefault(require("compromise"));
-class MedicalNERService {
+import nlp from 'compromise';
+export class MedicalNERService {
     medicalTerms;
     drugPatterns;
     conditionPatterns;
@@ -201,7 +195,7 @@ class MedicalNERService {
     extractByNLP(text) {
         const entities = [];
         try {
-            const doc = (0, compromise_1.default)(text);
+            const doc = nlp(text);
             // Extract people (could be doctors, patients)
             const people = doc.people().out('array');
             people.forEach((person) => {
@@ -293,5 +287,4 @@ class MedicalNERService {
         return stats;
     }
 }
-exports.MedicalNERService = MedicalNERService;
 //# sourceMappingURL=medical-ner-service.js.map

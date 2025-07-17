@@ -1,9 +1,6 @@
-"use strict";
 // src/services/google-embedding-service.ts
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.GoogleEmbeddingService = void 0;
-const genai_1 = require("@google/genai");
-class GoogleEmbeddingService {
+import { GoogleGenAI } from "@google/genai";
+export class GoogleEmbeddingService {
     client;
     model;
     isInitialized = false;
@@ -11,7 +8,7 @@ class GoogleEmbeddingService {
         if (!apiKey) {
             throw new Error('Google AI API key is required');
         }
-        this.client = new genai_1.GoogleGenAI({ apiKey });
+        this.client = new GoogleGenAI({ apiKey });
         this.model = model;
     }
     async initialize() {
@@ -169,5 +166,4 @@ class GoogleEmbeddingService {
         console.log('Google Embedding Service shut down');
     }
 }
-exports.GoogleEmbeddingService = GoogleEmbeddingService;
 //# sourceMappingURL=google-embedding-service.js.map

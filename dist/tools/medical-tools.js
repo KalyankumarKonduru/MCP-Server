@@ -1,7 +1,4 @@
-"use strict";
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.MedicalTools = void 0;
-class MedicalTools {
+export class MedicalTools {
     mongoClient;
     nerService;
     embeddingService;
@@ -532,5 +529,4 @@ class MedicalTools {
         ];
     }
 }
-exports.MedicalTools = MedicalTools;
 //# sourceMappingURL=medical-tools.js.map

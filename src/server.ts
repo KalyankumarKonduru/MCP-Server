@@ -457,13 +457,6 @@ export class MedicalMCPServer {
       logger.log('   🧠 generateEmbeddingLocal - Generate embeddings locally');
       logger.log('   📄 chunkAndEmbedDocument - Chunk and embed large documents');
       logger.log('   🔍 semanticSearchLocal - Search using local embeddings');
-      logger.log('\n🏥 Epic FHIR tools:');
-      logger.log('   👥 searchPatients - Search patients in Epic EHR');
-      logger.log('   👤 getPatientDetails - Get detailed patient information');
-      logger.log('   🧪 getPatientObservations - Get lab results and vitals');
-      logger.log('   💊 getPatientMedications - Get patient medications');
-      logger.log('   🩺 getPatientConditions - Get patient diagnoses/conditions');
-      logger.log('   🏨 getPatientEncounters - Get patient visits/encounters');
       
       logger.log('\n💬 The server is now listening for MCP client connections...');
     } catch (error) {

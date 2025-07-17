@@ -1,10 +1,7 @@
-"use strict";
 // src/db/setup-vector-indexes.ts - Updated for Google AI Embeddings Only
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.setupVectorIndexes = setupVectorIndexes;
-const mongodb_1 = require("mongodb");
-async function setupVectorIndexes(connectionString, dbName = 'medical_documents') {
-    const client = new mongodb_1.MongoClient(connectionString);
+import { MongoClient } from 'mongodb';
+export async function setupVectorIndexes(connectionString, dbName = 'medical_documents') {
+    const client = new MongoClient(connectionString);
     try {
         await client.connect();
         console.log('Connected to MongoDB for index setup...');

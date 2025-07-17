@@ -1,6 +1,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import pdfParse from 'pdf-parse'; // Fixed import
+import pdfParse from 'pdf-parse';
 
 export interface PDFParseResult {
   text: string;
@@ -38,12 +38,13 @@ export class PDFService {
       const fileBuffer = fs.readFileSync(filePath);
       const fileStats = fs.statSync(filePath);
       
-      const pdfData = await pdfParse(fileBuffer, {
-        max: options?.maxPages || 0, // 0 means no limit
+      // Use dynamic import for pdf-parse to handle ES module compatibility
+      const { default: pdfParseModule } = await import('pdf-parse');
+      const pdfData = await pdfParseModule(fileBuffer, {
+        max: options?.maxPages || 0,
         version: 'v1.10.100'
       });
 
-      // Process text based on options
       let processedText = pdfData.text;
       
       if (options?.preserveFormatting) {
@@ -52,7 +53,6 @@ export class PDFService {
         processedText = this.cleanText(processedText);
       }
 
-      // Apply page range if specified
       if (options?.pageRange) {
         processedText = this.extractPageRange(processedText, options.pageRange, pdfData.numpages);
       }
@@ -85,7 +85,9 @@ export class PDFService {
     try {
       console.log('Parsing PDF from buffer');
       
-      const pdfData = await pdfParse(buffer, {
+      // Use dynamic import for pdf-parse
+      const { default: pdfParseModule } = await import('pdf-parse');
+      const pdfData = await pdfParseModule(buffer, {
         max: options?.maxPages || 0,
         version: 'v1.10.100'
       });
@@ -128,16 +130,15 @@ export class PDFService {
 
   private cleanText(text: string): string {
     return text
-      .replace(/\r\n/g, '\n') // Normalize line endings
-      .replace(/\r/g, '\n')   // Handle old Mac line endings
-      .replace(/\n{3,}/g, '\n\n') // Reduce multiple newlines
-      .replace(/\s{2,}/g, ' ') // Reduce multiple spaces
-      .replace(/\t/g, ' ')     // Replace tabs with spaces
+      .replace(/\r\n/g, '\n')
+      .replace(/\r/g, '\n')
+      .replace(/\n{3,}/g, '\n\n')
+      .replace(/\s{2,}/g, ' ')
+      .replace(/\t/g, ' ')
       .trim();
   }
 
   private preserveFormatting(text: string): string {
-    // Minimal cleaning while preserving structure
     return text
       .replace(/\r\n/g, '\n')
       .replace(/\r/g, '\n')
@@ -145,8 +146,6 @@ export class PDFService {
   }
 
   private extractPageRange(text: string, range: { start: number; end: number }, totalPages: number): string {
-    // This is a simplified implementation
-    // In a real scenario, you'd need to track page boundaries during parsing
     const lines = text.split('\n');
     const linesPerPage = Math.ceil(lines.length / totalPages);
     
@@ -181,7 +180,6 @@ export class PDFService {
     const sections: Record<string, string> = {};
     const lines = text.split('\n');
     
-    // Common medical document section headers
     const sectionPatterns = {
       'Chief Complaint': /^(chief complaint|cc):/i,
       'History of Present Illness': /^(history of present illness|hpi):/i,
@@ -203,12 +201,10 @@ export class PDFService {
       
       for (const [sectionName, pattern] of Object.entries(sectionPatterns)) {
         if (pattern.test(line.trim())) {
-          // Save previous section
           if (currentSection && currentContent.length > 0) {
             sections[currentSection] = currentContent.join('\n').trim();
           }
           
-          // Start new section
           currentSection = sectionName;
           currentContent = [line];
           foundSection = true;
@@ -221,7 +217,6 @@ export class PDFService {
       }
     }
 
-    // Save last section
     if (currentSection && currentContent.length > 0) {
       sections[currentSection] = currentContent.join('\n').trim();
     }
@@ -232,7 +227,6 @@ export class PDFService {
   private calculateMedicalConfidence(text: string, sections: Record<string, string>): number {
     let confidence = 0;
     
-    // Base confidence from medical keywords
     const medicalKeywords = [
       'patient', 'diagnosis', 'treatment', 'medication', 'symptoms',
       'doctor', 'physician', 'hospital', 'clinic', 'prescription'
@@ -244,13 +238,11 @@ export class PDFService {
     
     confidence += (foundKeywords.length / medicalKeywords.length) * 40;
     
-    // Confidence from identified sections
     const expectedSections = ['Chief Complaint', 'Assessment', 'Plan', 'Medications'];
     const foundSections = expectedSections.filter(section => sections[section]);
     
     confidence += (foundSections.length / expectedSections.length) * 40;
     
-    // Confidence from document structure
     if (text.length > 100) confidence += 10;
     if (text.includes('Date:') || text.includes('DOB:')) confidence += 10;
     
@@ -267,7 +259,6 @@ export class PDFService {
       const issues: string[] = [];
       let confidence = 100;
       
-      // Check if file exists and is readable
       if (!fs.existsSync(filePath)) {
         return {
           isValid: false,
@@ -279,19 +270,16 @@ export class PDFService {
 
       const result = await this.parsePDF(filePath);
       
-      // Check if PDF was encrypted
       if (result.info.encrypted) {
         issues.push('PDF is encrypted');
         confidence -= 30;
       }
 
-      // Check text extraction quality
       if (result.text.length < 50) {
         issues.push('Very little text extracted');
         confidence -= 40;
       }
 
-      // Check for medical content
       const medicalInfo = await this.extractMedicalInformation(filePath);
       const isMedical = medicalInfo.confidence > 50;
       
@@ -318,8 +306,6 @@ export class PDFService {
 
   async extractTextByPages(filePath: string): Promise<Array<{ pageNumber: number; text: string }>> {
     try {
-      // This is a simplified implementation
-      // For true page-by-page extraction, you'd need a more sophisticated PDF library
       const result = await this.parsePDF(filePath);
       const lines = result.text.split('\n');
       const linesPerPage = Math.ceil(lines.length / result.pageCount);

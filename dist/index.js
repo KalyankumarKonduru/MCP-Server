@@ -1,9 +1,5 @@
 #!/usr/bin/env node
-"use strict";
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.MedicalMCPServer = void 0;
-const server_js_1 = require("./server.js");
-Object.defineProperty(exports, "MedicalMCPServer", { enumerable: true, get: function () { return server_js_1.MedicalMCPServer; } });
+import { MedicalMCPServer } from './server.js';
 /**
  * Medical MCP Server Entry Point
  *
@@ -26,7 +22,7 @@ if (isStdioMode) {
 async function main() {
     try {
         // Create and start the server
-        const server = new server_js_1.MedicalMCPServer();
+        const server = new MedicalMCPServer();
         // Setup graceful shutdown
         let isShuttingDown = false;
         const gracefulShutdown = async (signal) => {
@@ -106,10 +102,11 @@ process.on('unhandledRejection', (reason, promise) => {
     process.exit(1);
 });
 // Start the server if this file is run directly
-if (require.main === module) {
+if (import.meta.url === `file://${process.argv[1]}`) {
     main().catch((error) => {
         console.error('💥 Failed to start server:', error);
         process.exit(1);
     });
 }
+export { MedicalMCPServer };
 //# sourceMappingURL=index.js.map

@@ -1,15 +1,12 @@
-"use strict";
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.MongoDBClient = void 0;
 // src/db/mongodb-client.ts
-const mongodb_1 = require("mongodb");
-class MongoDBClient {
+import { MongoClient } from 'mongodb';
+export class MongoDBClient {
     client;
     db;
     documentsCollection;
     entitiesCollection;
     constructor(connectionString, dbName = 'MCP') {
-        this.client = new mongodb_1.MongoClient(connectionString);
+        this.client = new MongoClient(connectionString);
         this.db = this.client.db(dbName);
         this.documentsCollection = this.db.collection('documents');
         this.entitiesCollection = this.db.collection('entities');
@@ -308,5 +305,4 @@ class MongoDBClient {
         }
     }
 }
-exports.MongoDBClient = MongoDBClient;
 //# sourceMappingURL=mongodb-client.js.map
