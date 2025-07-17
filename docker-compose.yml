@@ -1,0 +1,35 @@
+version: '3.8'
+
+services:
+  medical-server:
+    build: .
+    ports:
+      - "3001:3001"
+    environment:
+      - NODE_ENV=production
+      - PORT=3001
+      - MCP_HTTP_MODE=true
+      - MONGODB_CONNECTION_STRING=mongodb://mongo:27017
+      - MONGODB_DATABASE_NAME=MCP
+    depends_on:
+      - mongo
+    volumes:
+      - ./uploads:/app/uploads
+      - medical_logs:/app/logs
+      - medical_temp:/app/temp
+    restart: unless-stopped
+
+  mongo:
+    image: mongo:7
+    ports:
+      - "27017:27017"
+    environment:
+      - MONGO_INITDB_DATABASE=MCP
+    volumes:
+      - medical_mongo_data:/data/db
+    restart: unless-stopped
+
+volumes:
+  medical_mongo_data:
+  medical_logs:
+  medical_temp:
