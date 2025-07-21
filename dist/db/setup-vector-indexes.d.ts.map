@@ -1,1 +1,1 @@
-{"version":3,"file":"setup-vector-indexes.d.ts","sourceRoot":"","sources":["../../src/db/setup-vector-indexes.ts"],"names":[],"mappings":"AAIA,wBAAsB,kBAAkB,CACtC,gBAAgB,EAAE,MAAM,EACxB,MAAM,GAAE,MAA4B,iBA8KrC"}
+{"version":3,"file":"setup-vector-indexes.d.ts","sourceRoot":"","sources":["../../src/db/setup-vector-indexes.ts"],"names":[],"mappings":"AAEA,wBAAsB,kBAAkB,CACtC,gBAAgB,EAAE,MAAM,EACxB,MAAM,GAAE,MAA4B,iBA8KrC"}

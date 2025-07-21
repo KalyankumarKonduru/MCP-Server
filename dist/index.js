@@ -1,16 +1,4 @@
-#!/usr/bin/env node
 import { MedicalMCPServer } from './server.js';
-/**
- * Medical MCP Server Entry Point
- *
- * This server provides medical document processing capabilities including:
- * - Document upload and text extraction (PDF, images)
- * - Medical Named Entity Recognition (NER)
- * - Vector search with embeddings
- * - Patient history analysis
- * - Similar case finding
- * - Medical insights generation
- */
 // Detect if running in stdio mode
 const isStdioMode = process.argv.includes('--stdio') ||
     process.stdin.isTTY === false ||

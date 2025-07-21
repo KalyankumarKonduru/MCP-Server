@@ -1,7 +1,3 @@
-// src/services/embedding-service.ts
-// This file is replaced by local-embedding-service.ts
-// Keeping this as a stub to prevent import errors
-
 import { EmbeddingServiceInterface } from '../interfaces/embedding-interface.js';
 
 export interface EmbeddingResult {

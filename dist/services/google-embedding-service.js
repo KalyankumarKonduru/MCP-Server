@@ -1,4 +1,3 @@
-// src/services/google-embedding-service.ts
 import { GoogleGenAI } from "@google/genai";
 export class GoogleEmbeddingService {
     client;

@@ -1,5 +1,3 @@
-// src/tools/local-embedding-tools.ts
-
 import { Tool } from '@modelcontextprotocol/sdk/types.js';
 import { MongoDBClient, MedicalDocument } from '../db/mongodb-client.js';
 import { pipeline } from '@xenova/transformers';

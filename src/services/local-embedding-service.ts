@@ -1,5 +1,3 @@
-// src/services/local-embedding-service.ts
-
 import { pipeline } from '@xenova/transformers';
 import { EmbeddingServiceInterface } from '../interfaces/embedding-interface.js';
 

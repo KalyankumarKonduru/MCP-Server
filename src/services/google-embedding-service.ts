@@ -1,5 +1,3 @@
-// src/services/google-embedding-service.ts
-
 import { GoogleGenAI } from "@google/genai";
 import { EmbeddingServiceInterface } from '../interfaces/embedding-interface.js';
 

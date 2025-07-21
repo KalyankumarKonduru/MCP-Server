@@ -1,4 +1,3 @@
-// src/tools/document-tools.ts
 import { Tool } from '@modelcontextprotocol/sdk/types.js';
 import { MongoDBClient, MedicalDocument } from '../db/mongodb-client.js';
 import { LocalEmbeddingService } from '../services/local-embedding-service.js';

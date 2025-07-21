@@ -1,5 +1,3 @@
-// src/tools/google-embedding-tools.ts
-
 import { Tool } from '@modelcontextprotocol/sdk/types.js';
 import { MongoDBClient, MedicalDocument } from '../db/mongodb-client.js';
 import { GoogleEmbeddingService } from '../services/google-embedding-service.js';

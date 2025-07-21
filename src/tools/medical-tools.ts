@@ -1,4 +1,3 @@
-// src/tools/medical-tools.ts
 import { Tool } from '@modelcontextprotocol/sdk/types.js';
 import { MongoDBClient, MedicalDocument, MedicalEntity } from '../db/mongodb-client.js';
 import { MedicalNERService } from '../services/medical-ner-service.js';

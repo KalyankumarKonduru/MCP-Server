@@ -1,4 +1,3 @@
-// src/tools/google-embedding-tools.ts
 // Chunking utility function
 function chunkText(text, chunkSize = 500, overlap = 100) {
     const words = text.split(/\s+/);

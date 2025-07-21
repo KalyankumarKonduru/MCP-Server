@@ -1,5 +1,3 @@
-// src/db/setup-vector-indexes.ts - Updated for Google AI Embeddings Only
-
 import { MongoClient } from 'mongodb';
 
 export async function setupVectorIndexes(

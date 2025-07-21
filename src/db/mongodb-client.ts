@@ -1,4 +1,3 @@
-// src/db/mongodb-client.ts
 import { MongoClient, Db, Collection } from 'mongodb';
 
 export interface MedicalDocument {

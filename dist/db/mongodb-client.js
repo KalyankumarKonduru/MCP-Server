@@ -1,4 +1,3 @@
-// src/db/mongodb-client.ts
 import { MongoClient } from 'mongodb';
 export class MongoDBClient {
     client;

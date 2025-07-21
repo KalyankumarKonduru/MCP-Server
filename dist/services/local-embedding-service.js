@@ -1,4 +1,3 @@
-// src/services/local-embedding-service.ts
 import { pipeline } from '@xenova/transformers';
 export class LocalEmbeddingService {
     embedder = null;

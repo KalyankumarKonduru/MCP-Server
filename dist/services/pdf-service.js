@@ -1,5 +1,3 @@
-// src/services/pdf-service.ts - SIMPLE NO-DEPENDENCY VERSION
-// This completely removes PDF.js and uses basic text extraction + your existing OCR
 import * as fs from 'fs';
 import * as path from 'path';
 export class PDFService {

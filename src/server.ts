@@ -1,10 +1,9 @@
-// src/server.ts - Fixed version with proper MCP notification handling and Docker support
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
-  InitializedNotificationSchema, // ADD THIS IMPORT
+  InitializedNotificationSchema,
 } from '@modelcontextprotocol/sdk/types.js';
 import dotenv from 'dotenv';
 
@@ -17,7 +16,7 @@ import { DocumentTools } from './tools/document-tools.js';
 import { MedicalTools } from './tools/medical-tools.js';
 import { LocalEmbeddingTools } from './tools/local-embedding-tools.js';
 
-// Load environment variables
+// Loading environment variables
 dotenv.config();
 
 const isStdioMode = process.argv.includes('--stdio') || 

@@ -1,6 +1,3 @@
-// src/services/embedding-service.ts
-// This file is replaced by local-embedding-service.ts
-// Keeping this as a stub to prevent import errors
 export class EmbeddingService {
     constructor(apiKey, model) {
         console.warn('⚠️  EmbeddingService is deprecated. Use LocalEmbeddingService instead.');

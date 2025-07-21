@@ -1,4 +1,3 @@
-// src/tools/local-embedding-tools.ts
 import { pipeline } from '@xenova/transformers';
 // Global model instances (loaded once)
 let embedder;

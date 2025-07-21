@@ -1,4 +1,3 @@
-// src/db/setup-vector-indexes.ts - Updated for Google AI Embeddings Only
 import { MongoClient } from 'mongodb';
 export async function setupVectorIndexes(connectionString, dbName = 'medical_documents') {
     const client = new MongoClient(connectionString);
