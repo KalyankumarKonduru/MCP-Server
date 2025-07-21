@@ -2,34 +2,60 @@ version: '3.8'
 
 services:
   medical-server:
-    build: .
+    image: mongodb-mcp-server:latest
+    container_name: medical-server
     ports:
       - "3001:3001"
     environment:
+      # MongoDB Configuration
+      - MONGODB_CONNECTION_STRING=${MONGODB_CONNECTION_STRING:-mongodb+srv://kalyankitkat555:kalyankitkat5@cluster0.yh9dreh.mongodb.net/?retryWrites=true&w=majority}
+      - MONGODB_DATABASE_NAME=${MONGODB_DATABASE_NAME:-MCP}
+      
+      # HTTP Server Configuration (CRITICAL!)
+      - MCP_HTTP_MODE=true
+      - MCP_HTTP_PORT=3001
+      
+      # Google AI Configuration  
+      - GOOGLE_AI_API_KEY=${GOOGLE_AI_API_KEY:-AIzaSyDxkNDkpVnPJYjiBFyS9WvgaaEO4QtY4Cs}
+      - GOOGLE_EMBEDDING_MODEL=${GOOGLE_EMBEDDING_MODEL:-models/text-embedding-004}
+      
+      # OCR Configuration
+      - TESSERACT_LANG=${TESSERACT_LANG:-eng}
+      - GOOGLE_API_RATE_LIMIT=${GOOGLE_API_RATE_LIMIT:-100}
+      - EMBEDDING_BATCH_SIZE=${EMBEDDING_BATCH_SIZE:-10}
+      - EMBEDDING_CACHE_TTL=${EMBEDDING_CACHE_TTL:-3600}
+      
+      # System
       - NODE_ENV=production
       - PORT=3001
-      - MCP_HTTP_MODE=true
-      - MONGODB_CONNECTION_STRING=mongodb://mongo:27017
-      - MONGODB_DATABASE_NAME=MCP
-    depends_on:
-      - mongo
+      - LOG_LEVEL=${LOG_LEVEL:-info}
     volumes:
       - ./uploads:/app/uploads
       - medical_logs:/app/logs
       - medical_temp:/app/temp
     restart: unless-stopped
-
-  mongo:
-    image: mongo:7
-    ports:
-      - "27017:27017"
-    environment:
-      - MONGO_INITDB_DATABASE=MCP
-    volumes:
-      - medical_mongo_data:/data/db
-    restart: unless-stopped
+    networks:
+      - medical-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    # Resource limits (optional but recommended)
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: '1.0'
+        reservations:
+          memory: 512M
+          cpus: '0.25'
 
 volumes:
-  medical_mongo_data:
   medical_logs:
   medical_temp:
+
+networks:
+  medical-network:
+    driver: bridge

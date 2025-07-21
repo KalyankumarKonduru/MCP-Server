@@ -29,6 +29,14 @@ export declare class PDFService {
     constructor();
     parsePDF(filePath: string, options?: PDFProcessingOptions): Promise<PDFParseResult>;
     parsePDFBuffer(buffer: Buffer, options?: PDFProcessingOptions): Promise<PDFParseResult>;
+    private extractTextFromPDFBuffer;
+    private extractFromPDFStreams;
+    private extractFromTextObjects;
+    private extractSimpleText;
+    private isBinaryStream;
+    private isLikelyText;
+    private extractBasicMetadata;
+    private estimatePageCount;
     private cleanText;
     private preserveFormatting;
     private extractPageRange;

@@ -1,7 +1,8 @@
-// src/server.ts - Updated with Epic FHIR Integration
+// src/server.ts - Fixed version with proper MCP notification handling and Docker support
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
-import { CallToolRequestSchema, ListToolsRequestSchema, } from '@modelcontextprotocol/sdk/types.js';
+import { CallToolRequestSchema, ListToolsRequestSchema, InitializedNotificationSchema, // ADD THIS IMPORT
+ } from '@modelcontextprotocol/sdk/types.js';
 import dotenv from 'dotenv';
 import { MongoDBClient } from './db/mongodb-client.js';
 import { LocalEmbeddingService } from './services/local-embedding-service.js';
@@ -57,7 +58,6 @@ export class MedicalMCPServer {
         this.documentTools = new DocumentTools(this.mongoClient, this.localEmbeddingService, this.nerService, this.ocrService, this.pdfService);
         this.medicalTools = new MedicalTools(this.mongoClient, this.nerService, this.localEmbeddingService);
         this.localEmbeddingTools = new LocalEmbeddingTools(this.mongoClient);
-        // NEW: Initialize Epic FHIR tools
         // Initialize MCP server
         this.server = new Server({
             name: 'medical-mcp-server-with-epic',
@@ -71,7 +71,7 @@ export class MedicalMCPServer {
         this.setupHandlers();
     }
     setupHandlers() {
-        // List available tools (including Epic FHIR tools)
+        // List available tools
         this.server.setRequestHandler(ListToolsRequestSchema, async () => {
             const documentToolsList = this.documentTools.getAllTools();
             const medicalToolsList = this.medicalTools.getAllTools();
@@ -84,7 +84,12 @@ export class MedicalMCPServer {
                 ],
             };
         });
-        // Handle tool calls (including Epic FHIR tools)
+        // FIX 1: Add notification handler for 'initialized' notification
+        this.server.setNotificationHandler(InitializedNotificationSchema, async () => {
+            logger.log('✅ Client initialized notification received');
+            // No response needed for notifications
+        });
+        // Handle tool calls
         this.server.setRequestHandler(CallToolRequestSchema, async (request) => {
             const { name, arguments: args } = request.params;
             try {
@@ -311,6 +316,12 @@ export class MedicalMCPServer {
                                 id: request.id
                             });
                         }
+                        else if (request.method === 'notifications/initialized') {
+                            // FIX 2: Handle initialized notification properly - return 202 Accepted
+                            logger.log('✅ HTTP Client initialized notification received');
+                            res.status(202).send(); // No body for notifications
+                            return;
+                        }
                         else if (request.method === 'tools/list') {
                             res.json({
                                 jsonrpc: '2.0',
@@ -355,12 +366,13 @@ export class MedicalMCPServer {
                         });
                     }
                 });
-                const port = process.env.MCP_HTTP_PORT || 3001;
-                app.listen(port, () => {
+                const port = parseInt(process.env.MCP_HTTP_PORT || '3001', 10);
+                // FIX 3: Bind to 0.0.0.0 for Docker compatibility
+                app.listen(port, '0.0.0.0', () => {
                     logger.log(`🚀 HTTP Server ready with Epic FHIR integration`);
                     logger.log(`📊 Server Information:`);
                     logger.log(`======================`);
-                    logger.log(`✓ HTTP Server listening on port ${port}`);
+                    logger.log(`✓ HTTP Server listening on port ${port} (all interfaces 0.0.0.0)`);
                     logger.log(`🌐 Health check: http://localhost:${port}/health`);
                     logger.log(`🔗 MCP endpoint: http://localhost:${port}/mcp`);
                     this.logServerInfo();
@@ -447,7 +459,7 @@ export class MedicalMCPServer {
         services.ner = true;
         services.ocr = this.ocrService ? true : false;
         services.pdf = true;
-        services.epicFHIR = true; // Epic FHIR is always available (sandbox mode)
+        services.epicFHIR = true;
         return {
             status: allHealthy ? 'healthy' : 'unhealthy',
             services,
