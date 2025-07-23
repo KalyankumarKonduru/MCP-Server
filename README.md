@@ -1,4 +1,50 @@
-**MERMAID DIAGRAM: -**
+
+# Medical MCP Server
+
+A comprehensive Model Context Protocol (MCP) server for medical document processing with advanced AI capabilities. This server provides document upload, OCR processing, medical Named Entity Recognition (NER), local embedding generation, and vector-based semantic search for healthcare applications.
+
+## 🏥 Features
+
+- **Document Processing**: Upload and process medical documents (PDF, images) with automatic text extraction
+- **Medical NER**: Extract medical entities (medications, conditions, procedures, lab values) from text
+- **Local Embeddings**: Generate embeddings using local HuggingFace models for privacy and control
+- **Vector Search**: Semantic similarity search across medical documents and patient data
+- **OCR Processing**: Extract text from medical images and scanned documents
+- **PDF Support**: Process medical PDFs with text extraction and analysis
+- **MongoDB Integration**: Store documents, embeddings, and medical entities with optimized indexes
+- **Multiple Transport Modes**: HTTP and STDIO transport support
+- **Health Monitoring**: Built-in health check endpoints and service monitoring
+- **Document Management**: Complete CRUD operations for medical documents
+
+## 📋 Available Tools
+
+### Document Management
+- **`uploadDocument`** - Upload and process medical documents with automatic text extraction, NER, and embedding generation
+- **`searchDocuments`** - Search documents using vector similarity and text search with hybrid ranking
+- **`listDocuments`** - List documents with filtering by patient, document type, or date range
+
+### Medical Analysis
+- **`extractMedicalEntities`** - Extract medical entities (medications, conditions, procedures, etc.) from text
+- **`findSimilarCases`** - Find similar medical cases based on symptoms, conditions, or medications
+- **`analyzePatientHistory`** - Analyze patient medical history with timeline, summary, or trend analysis
+- **`getMedicalInsights`** - Get medical insights and recommendations based on query and context
+
+### Embedding & Search
+- **`generateEmbeddingLocal`** - Generate embeddings locally using HuggingFace transformers
+- **`chunkAndEmbedDocument`** - Split large documents into chunks and generate embeddings for each
+- **`semanticSearchLocal`** - Perform semantic search using local embeddings
+
+## 🚀 Quick Start
+
+### Prerequisites
+
+- Node.js 18.0.0 or higher
+- TypeScript 5.0.0 or higher
+- MongoDB 4.4 or higher
+- Python 3.8+ (for local embedding models)
+- Tesseract OCR (for image text extraction)
+
+### MERMAID DIAGRAM: -
 
 ```mermaid
 graph TB
@@ -67,50 +113,6 @@ graph TB
     class PDF,OCR,NER,Embed service
     class Mongo storage
 ```
-# Medical MCP Server
-
-A comprehensive Model Context Protocol (MCP) server for medical document processing with advanced AI capabilities. This server provides document upload, OCR processing, medical Named Entity Recognition (NER), local embedding generation, and vector-based semantic search for healthcare applications.
-
-## 🏥 Features
-
-- **Document Processing**: Upload and process medical documents (PDF, images) with automatic text extraction
-- **Medical NER**: Extract medical entities (medications, conditions, procedures, lab values) from text
-- **Local Embeddings**: Generate embeddings using local HuggingFace models for privacy and control
-- **Vector Search**: Semantic similarity search across medical documents and patient data
-- **OCR Processing**: Extract text from medical images and scanned documents
-- **PDF Support**: Process medical PDFs with text extraction and analysis
-- **MongoDB Integration**: Store documents, embeddings, and medical entities with optimized indexes
-- **Multiple Transport Modes**: HTTP and STDIO transport support
-- **Health Monitoring**: Built-in health check endpoints and service monitoring
-- **Document Management**: Complete CRUD operations for medical documents
-
-## 📋 Available Tools
-
-### Document Management
-- **`uploadDocument`** - Upload and process medical documents with automatic text extraction, NER, and embedding generation
-- **`searchDocuments`** - Search documents using vector similarity and text search with hybrid ranking
-- **`listDocuments`** - List documents with filtering by patient, document type, or date range
-
-### Medical Analysis
-- **`extractMedicalEntities`** - Extract medical entities (medications, conditions, procedures, etc.) from text
-- **`findSimilarCases`** - Find similar medical cases based on symptoms, conditions, or medications
-- **`analyzePatientHistory`** - Analyze patient medical history with timeline, summary, or trend analysis
-- **`getMedicalInsights`** - Get medical insights and recommendations based on query and context
-
-### Embedding & Search
-- **`generateEmbeddingLocal`** - Generate embeddings locally using HuggingFace transformers
-- **`chunkAndEmbedDocument`** - Split large documents into chunks and generate embeddings for each
-- **`semanticSearchLocal`** - Perform semantic search using local embeddings
-
-## 🚀 Quick Start
-
-### Prerequisites
-
-- Node.js 18.0.0 or higher
-- TypeScript 5.0.0 or higher
-- MongoDB 4.4 or higher
-- Python 3.8+ (for local embedding models)
-- Tesseract OCR (for image text extraction)
 
 ### Installation
 
