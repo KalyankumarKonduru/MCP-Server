@@ -1,5 +1,6 @@
 export declare class MedicalMCPServer {
     private server;
+    private app?;
     private mongoClient;
     private localEmbeddingService;
     private nerService;
@@ -10,12 +11,13 @@ export declare class MedicalMCPServer {
     private localEmbeddingTools;
     constructor();
     private setupHandlers;
-    private handleToolCall;
     private handleExtractText;
     private handleSearchByDiagnosis;
     private handleSemanticSearch;
     private handleGetPatientSummary;
     start(): Promise<void>;
+    private startStreamableHTTPServer;
+    private startStdioServer;
     private logServerInfo;
     stop(): Promise<void>;
     private cleanup;

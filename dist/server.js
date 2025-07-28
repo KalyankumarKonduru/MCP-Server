@@ -1,6 +1,13 @@
+// Medical MCP Repository
+// File: src/server.ts
+// Updated to use Official MCP SDK StreamableHTTP for HTTP mode
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
+import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { CallToolRequestSchema, ListToolsRequestSchema, InitializedNotificationSchema, } from '@modelcontextprotocol/sdk/types.js';
+import express from 'express';
+import cors from 'cors';
+import crypto from 'crypto';
 import dotenv from 'dotenv';
 import { MongoDBClient } from './db/mongodb-client.js';
 import { LocalEmbeddingService } from './services/local-embedding-service.js';
@@ -31,6 +38,7 @@ const logger = {
 };
 export class MedicalMCPServer {
     server;
+    app;
     mongoClient;
     localEmbeddingService;
     nerService;
@@ -56,11 +64,11 @@ export class MedicalMCPServer {
         this.documentTools = new DocumentTools(this.mongoClient, this.localEmbeddingService, this.nerService, this.ocrService, this.pdfService);
         this.medicalTools = new MedicalTools(this.mongoClient, this.nerService, this.localEmbeddingService);
         this.localEmbeddingTools = new LocalEmbeddingTools(this.mongoClient);
-        // Initialize MCP server
+        // Initialize MCP server with official SDK
         this.server = new Server({
-            name: 'medical-mcp-server-with-epic',
-            version: '1.0.0',
-            description: 'Medical MCP Server with Epic FHIR integration, document processing, NER, and vector search capabilities'
+            name: 'medical-mcp-server-enhanced',
+            version: '2.0.0',
+            description: 'Medical MCP Server with document processing, enhanced NER, and vector search capabilities (Official SDK)'
         }, {
             capabilities: {
                 tools: {},
@@ -69,7 +77,7 @@ export class MedicalMCPServer {
         this.setupHandlers();
     }
     setupHandlers() {
-        // List available tools
+        // List available tools using official MCP SDK
         this.server.setRequestHandler(ListToolsRequestSchema, async () => {
             const documentToolsList = this.documentTools.getAllTools();
             const medicalToolsList = this.medicalTools.getAllTools();
@@ -82,67 +90,57 @@ export class MedicalMCPServer {
                 ],
             };
         });
-        // FIX 1: Add notification handler for 'initialized' notification
+        // Handle initialized notification using official MCP SDK
         this.server.setNotificationHandler(InitializedNotificationSchema, async () => {
             logger.log('✅ Client initialized notification received');
             // No response needed for notifications
         });
-        // Handle tool calls
+        // Handle tool calls using official MCP SDK
         this.server.setRequestHandler(CallToolRequestSchema, async (request) => {
             const { name, arguments: args } = request.params;
             try {
-                console.log(`🔧 TOOL CALLED: "${name}" with args:`, JSON.stringify(args, null, 2));
-                switch (name) {
-                    // Existing document tools
-                    case 'uploadDocument':
-                        return await this.documentTools.handleUploadDocument(args || {});
-                    case 'searchDocuments':
-                        return await this.documentTools.handleSearchDocuments(args || {});
-                    case 'listDocuments':
-                        return await this.documentTools.handleListDocuments(args || {});
-                    // Existing medical tools
-                    case 'extractMedicalEntities':
-                        return await this.medicalTools.handleExtractMedicalEntities(args || {});
-                    case 'findSimilarCases':
-                        return await this.medicalTools.handleFindSimilarCases(args || {});
-                    case 'analyzePatientHistory':
-                        return await this.medicalTools.handleAnalyzePatientHistory(args || {});
-                    case 'getMedicalInsights':
-                        return await this.medicalTools.handleMedicalInsights(args || {});
-                    // Existing local embedding tools
-                    case 'generateEmbeddingLocal':
-                        return await this.localEmbeddingTools.handleGenerateEmbedding(args || {});
-                    case 'chunkAndEmbedDocument':
-                        return await this.localEmbeddingTools.handleChunkAndEmbed(args || {});
-                    case 'semanticSearchLocal':
-                        return await this.localEmbeddingTools.handleSemanticSearch(args || {});
-                    // Legacy compatibility
-                    case 'upload_document':
-                        return await this.documentTools.handleUploadDocument(args || {});
-                    case 'extract_text':
-                        return await this.handleExtractText(args || {});
-                    case 'extract_medical_entities':
-                        return await this.medicalTools.handleExtractMedicalEntities(args || {});
-                    case 'search_by_diagnosis':
-                        return await this.handleSearchByDiagnosis(args || {});
-                    case 'semantic_search':
-                        return await this.handleSemanticSearch(args || {});
-                    case 'get_patient_summary':
-                        return await this.handleGetPatientSummary(args || {});
-                    default:
-                        console.log(`❌ UNKNOWN TOOL: "${name}"`);
-                        throw new Error(`Unknown tool: ${name}`);
+                logger.log(`🔧 TOOL CALLED: "${name}" with args:`, JSON.stringify(args, null, 2));
+                // Route to appropriate tool handler
+                const toolHandlers = {
+                    // Document tools
+                    'uploadDocument': () => this.documentTools.handleUploadDocument(args || {}),
+                    'searchDocuments': () => this.documentTools.handleSearchDocuments(args || {}),
+                    'listDocuments': () => this.documentTools.handleListDocuments(args || {}),
+                    // Medical tools
+                    'extractMedicalEntities': () => this.medicalTools.handleExtractMedicalEntities(args || {}),
+                    'findSimilarCases': () => this.medicalTools.handleFindSimilarCases(args || {}),
+                    'analyzePatientHistory': () => this.medicalTools.handleAnalyzePatientHistory(args || {}),
+                    'getMedicalInsights': () => this.medicalTools.handleMedicalInsights(args || {}),
+                    // Local embedding tools
+                    'generateEmbeddingLocal': () => this.localEmbeddingTools.handleGenerateEmbedding(args || {}),
+                    'chunkAndEmbedDocument': () => this.localEmbeddingTools.handleChunkAndEmbed(args || {}),
+                    'semanticSearchLocal': () => this.localEmbeddingTools.handleSemanticSearch(args || {}),
+                    // Legacy compatibility handlers
+                    'upload_document': () => this.documentTools.handleUploadDocument(args || {}),
+                    'extract_text': () => this.handleExtractText(args || {}),
+                    'extract_medical_entities': () => this.medicalTools.handleExtractMedicalEntities(args || {}),
+                    'search_by_diagnosis': () => this.handleSearchByDiagnosis(args || {}),
+                    'semantic_search': () => this.handleSemanticSearch(args || {}),
+                    'get_patient_summary': () => this.handleGetPatientSummary(args || {}),
+                };
+                const handler = toolHandlers[name];
+                if (!handler) {
+                    throw new Error(`Unknown tool: ${name}`);
                 }
+                const result = await handler();
+                logger.log(`✅ TOOL COMPLETED: "${name}"`);
+                return result;
             }
             catch (error) {
-                logger.error(`Error handling tool ${name}:`, error);
+                const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+                logger.error(`❌ TOOL ERROR: "${name}":`, errorMessage);
                 return {
                     content: [
                         {
                             type: 'text',
                             text: JSON.stringify({
                                 success: false,
-                                error: error instanceof Error ? error.message : 'Unknown error occurred',
+                                error: errorMessage,
                                 tool: name,
                                 timestamp: new Date().toISOString()
                             }, null, 2)
@@ -152,55 +150,6 @@ export class MedicalMCPServer {
                 };
             }
         });
-    }
-    // Handle tool calls for HTTP mode
-    async handleToolCall(name, args) {
-        try {
-            console.log(`🔧 HTTP TOOL CALLED: "${name}" with args:`, JSON.stringify(args, null, 2));
-            switch (name) {
-                // Document tools
-                case 'uploadDocument':
-                    return await this.documentTools.handleUploadDocument(args || {});
-                case 'searchDocuments':
-                    return await this.documentTools.handleSearchDocuments(args || {});
-                case 'listDocuments':
-                    return await this.documentTools.handleListDocuments(args || {});
-                // Medical tools
-                case 'extractMedicalEntities':
-                    return await this.medicalTools.handleExtractMedicalEntities(args || {});
-                case 'findSimilarCases':
-                    return await this.medicalTools.handleFindSimilarCases(args || {});
-                case 'analyzePatientHistory':
-                    return await this.medicalTools.handleAnalyzePatientHistory(args || {});
-                case 'getMedicalInsights':
-                    return await this.medicalTools.handleMedicalInsights(args || {});
-                // Local embedding tools
-                case 'generateEmbeddingLocal':
-                    return await this.localEmbeddingTools.handleGenerateEmbedding(args || {});
-                case 'chunkAndEmbedDocument':
-                    return await this.localEmbeddingTools.handleChunkAndEmbed(args || {});
-                case 'semanticSearchLocal':
-                    return await this.localEmbeddingTools.handleSemanticSearch(args || {});
-                default:
-                    throw new Error(`Unknown tool: ${name}`);
-            }
-        }
-        catch (error) {
-            console.error(`❌ HTTP Tool call failed for ${name}:`, error);
-            return {
-                content: [
-                    {
-                        type: 'text',
-                        text: JSON.stringify({
-                            success: false,
-                            error: error instanceof Error ? error.message : 'Unknown error occurred',
-                            tool: name
-                        }, null, 2)
-                    }
-                ],
-                isError: true
-            };
-        }
     }
     // Legacy compatibility handlers
     async handleExtractText(args) {
@@ -250,149 +199,105 @@ export class MedicalMCPServer {
     async start() {
         try {
             if (isHttpMode) {
-                logger.log('🏥 Medical MCP Server v1.0.0 (HTTP Mode with Epic FHIR Integration)');
-                logger.log('===============================================');
+                logger.log('🏥 Medical MCP Server v2.0.0 (Official StreamableHTTP Mode)');
+                logger.log('===========================================================');
             }
             else if (isStdioMode) {
-                logger.error('Starting Medical MCP Server with Epic FHIR integration...');
+                logger.error('Starting Medical MCP Server (Official STDIO mode)...');
             }
             else {
-                logger.log('🏥 Medical MCP Server v1.0.0 (Epic FHIR Integration)');
+                logger.log('🏥 Medical MCP Server v2.0.0 (Official SDK)');
                 logger.log('============================================');
-                logger.log('Starting Medical MCP Server with Epic FHIR...');
             }
             // Connect to MongoDB
             await this.mongoClient.connect();
-            logger.log('✓ MongoDB connection established');
+            logger.log('✅ MongoDB connection established');
             // Initialize Local embedding service
             await this.localEmbeddingService.initialize();
-            logger.log('✓ Local Embedding service initialized');
+            logger.log('✅ Local Embedding service initialized');
             // Initialize OCR service
             await this.ocrService.initialize();
-            logger.log('✓ OCR service initialized');
-            // Start the MCP server
+            logger.log('✅ OCR service initialized');
+            // Start the appropriate transport
             if (isHttpMode) {
-                const express = await import('express');
-                const cors = await import('cors');
-                const app = express.default();
-                app.use(cors.default());
-                app.use(express.default.json());
-                // Health check endpoint
-                app.get('/health', (req, res) => {
-                    res.json({
-                        status: 'healthy',
-                        server: 'medical-mcp-server-with-epic',
-                        version: '1.0.0',
-                        features: ['document-processing', 'medical-ner', 'vector-search', 'epic-fhir'],
-                        timestamp: new Date().toISOString()
-                    });
-                });
-                // MCP endpoint
-                app.post('/mcp', async (req, res) => {
-                    try {
-                        const request = req.body;
-                        res.setHeader('Content-Type', 'application/json');
-                        let sessionId = req.headers['mcp-session-id'];
-                        if (!sessionId && request.method === 'initialize') {
-                            sessionId = `session-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-                            res.setHeader('mcp-session-id', sessionId);
-                            logger.log('📋 New session initialized:', sessionId);
-                        }
-                        if (request.method === 'initialize') {
-                            res.json({
-                                jsonrpc: '2.0',
-                                result: {
-                                    protocolVersion: '2024-11-05',
-                                    capabilities: {
-                                        tools: {}
-                                    },
-                                    serverInfo: {
-                                        name: 'medical-mcp-server-with-epic',
-                                        version: '1.0.0'
-                                    }
-                                },
-                                id: request.id
-                            });
-                        }
-                        else if (request.method === 'notifications/initialized') {
-                            // FIX 2: Handle initialized notification properly - return 202 Accepted
-                            logger.log('✅ HTTP Client initialized notification received');
-                            res.status(202).send(); // No body for notifications
-                            return;
-                        }
-                        else if (request.method === 'tools/list') {
-                            res.json({
-                                jsonrpc: '2.0',
-                                result: {
-                                    tools: [
-                                        ...this.documentTools.getAllTools(),
-                                        ...this.medicalTools.getAllTools(),
-                                        ...this.localEmbeddingTools.getAllTools(),
-                                    ]
-                                },
-                                id: request.id
-                            });
-                        }
-                        else if (request.method === 'tools/call') {
-                            const toolResult = await this.handleToolCall(request.params.name, request.params.arguments);
-                            res.json({
-                                jsonrpc: '2.0',
-                                result: toolResult,
-                                id: request.id
-                            });
-                        }
-                        else {
-                            res.status(400).json({
-                                jsonrpc: '2.0',
-                                error: {
-                                    code: -32601,
-                                    message: 'Method not found'
-                                },
-                                id: request.id
-                            });
-                        }
-                    }
-                    catch (error) {
-                        logger.error('HTTP request error:', error);
-                        res.status(500).json({
-                            jsonrpc: '2.0',
-                            error: {
-                                code: -32603,
-                                message: 'Internal error'
-                            },
-                            id: req.body?.id || null
-                        });
-                    }
-                });
-                const port = parseInt(process.env.MCP_HTTP_PORT || '3001', 10);
-                // FIX 3: Bind to 0.0.0.0 for Docker compatibility
-                app.listen(port, '0.0.0.0', () => {
-                    logger.log(`🚀 HTTP Server ready with Epic FHIR integration`);
-                    logger.log(`📊 Server Information:`);
-                    logger.log(`======================`);
-                    logger.log(`✓ HTTP Server listening on port ${port} (all interfaces 0.0.0.0)`);
-                    logger.log(`🌐 Health check: http://localhost:${port}/health`);
-                    logger.log(`🔗 MCP endpoint: http://localhost:${port}/mcp`);
-                    this.logServerInfo();
-                });
+                await this.startStreamableHTTPServer();
             }
             else {
-                const transport = new StdioServerTransport();
-                await this.server.connect(transport);
-                if (isStdioMode) {
-                    logger.error('Medical MCP Server with Epic FHIR running on stdio transport');
-                    logger.error('Ready to accept commands');
-                }
-                else {
-                    logger.log('✓ Medical MCP Server started successfully');
-                    this.logServerInfo();
-                }
+                await this.startStdioServer();
             }
         }
         catch (error) {
             logger.error('Failed to start server:', error);
             await this.cleanup();
             process.exit(1);
+        }
+    }
+    async startStreamableHTTPServer() {
+        // Create Express app for health checks and static endpoints
+        this.app = express();
+        this.app.use(cors());
+        this.app.use(express.json({ limit: '50mb' }));
+        // Health check endpoint
+        this.app.get('/health', (req, res) => {
+            res.json({
+                status: 'healthy',
+                server: 'medical-mcp-server-enhanced',
+                version: '2.0.0',
+                transport: 'Official MCP StreamableHTTP',
+                features: ['document-processing', 'medical-ner', 'vector-search', 'local-embeddings'],
+                timestamp: new Date().toISOString()
+            });
+        });
+        // Official MCP StreamableHTTP endpoint
+        this.app.post('/mcp', async (req, res) => {
+            try {
+                // Create StreamableHTTP transport for this request
+                const transport = new StreamableHTTPServerTransport({
+                    sessionIdGenerator: () => crypto.randomUUID()
+                });
+                // Connect server to transport for this request
+                await this.server.connect(transport);
+                // Handle the MCP request using official SDK
+                await transport.handleRequest(req, res, req.body);
+            }
+            catch (error) {
+                logger.error('StreamableHTTP request error:', error);
+                if (!res.headersSent) {
+                    res.status(500).json({
+                        jsonrpc: '2.0',
+                        error: {
+                            code: -32603,
+                            message: 'Internal server error'
+                        },
+                        id: req.body?.id || null
+                    });
+                }
+            }
+        });
+        // Start HTTP server
+        const port = parseInt(process.env.MCP_HTTP_PORT || '3001', 10);
+        this.app.listen(port, '0.0.0.0', () => {
+            logger.log('🚀 Medical MCP Server (Official StreamableHTTP) ready');
+            logger.log('📊 Server Information:');
+            logger.log('======================');
+            logger.log(`✅ StreamableHTTP Server listening on port ${port} (all interfaces)`);
+            logger.log(`🌐 Health check: http://localhost:${port}/health`);
+            logger.log(`🔗 MCP endpoint: http://localhost:${port}/mcp`);
+            logger.log(`📡 Transport: Official MCP SDK StreamableHTTP`);
+            logger.log(`🔧 Protocol: MCP 2024-11-05 compliant`);
+            this.logServerInfo();
+        });
+    }
+    async startStdioServer() {
+        const transport = new StdioServerTransport();
+        await this.server.connect(transport);
+        if (isStdioMode) {
+            logger.error('Medical MCP Server running on official STDIO transport');
+            logger.error('Ready to accept commands');
+        }
+        else {
+            logger.log('✅ Medical MCP Server started with official STDIO transport');
+            this.logServerInfo();
         }
     }
     async logServerInfo() {
@@ -413,7 +318,7 @@ export class MedicalMCPServer {
             logger.log('   🧠 generateEmbeddingLocal - Generate embeddings locally');
             logger.log('   📄 chunkAndEmbedDocument - Chunk and embed large documents');
             logger.log('   🔍 semanticSearchLocal - Search using local embeddings');
-            logger.log('\n💬 The server is now listening for MCP client connections...');
+            logger.log('\n💬 The server is now ready for official MCP client connections...');
         }
         catch (error) {
             logger.log('📊 Statistics unavailable during startup');
@@ -421,9 +326,9 @@ export class MedicalMCPServer {
     }
     async stop() {
         try {
-            logger.error('Stopping Medical MCP Server...');
+            logger.log('🛑 Shutting down Medical MCP Server...');
             await this.cleanup();
-            logger.error('✓ Server stopped gracefully');
+            logger.log('✅ Medical MCP Server stopped gracefully');
         }
         catch (error) {
             logger.error('Error stopping server:', error);
@@ -431,10 +336,16 @@ export class MedicalMCPServer {
     }
     async cleanup() {
         try {
-            await this.mongoClient.disconnect();
-            await this.ocrService.terminate();
-            await this.localEmbeddingService.shutdown();
-            logger.error('✓ All services cleaned up');
+            if (this.mongoClient) {
+                await this.mongoClient.disconnect();
+            }
+            if (this.ocrService) {
+                await this.ocrService.terminate();
+            }
+            if (this.localEmbeddingService) {
+                await this.localEmbeddingService.shutdown();
+            }
+            logger.log('✅ All services cleaned up');
         }
         catch (error) {
             logger.error('Error during cleanup:', error);
@@ -457,7 +368,6 @@ export class MedicalMCPServer {
         services.ner = true;
         services.ocr = this.ocrService ? true : false;
         services.pdf = true;
-        services.epicFHIR = true;
         return {
             status: allHealthy ? 'healthy' : 'unhealthy',
             services,
