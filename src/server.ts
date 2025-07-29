@@ -1,6 +1,6 @@
 // Medical MCP Repository
 // File: src/server.ts
-// Updated to use Official MCP SDK StreamableHTTP for HTTP mode
+// Updated to use Official MCP SDK StreamableHTTP for HTTP mode with proper session management
 
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
@@ -46,6 +46,12 @@ const logger = {
   }
 };
 
+interface MCPSession {
+  transport: StreamableHTTPServerTransport;
+  initialized: boolean;
+  lastAccess: number;
+}
+
 export class MedicalMCPServer {
   private server: Server;
   private app?: express.Application;
@@ -57,6 +63,9 @@ export class MedicalMCPServer {
   private documentTools: DocumentTools;
   private medicalTools: MedicalTools;
   private localEmbeddingTools: LocalEmbeddingTools;
+
+  // Session management for HTTP mode
+  private sessions: Map<string, MCPSession> = new Map();
 
   constructor() {
     // Validate required environment variables
@@ -286,7 +295,16 @@ export class MedicalMCPServer {
   private async startStreamableHTTPServer(): Promise<void> {
     // Create Express app for health checks and static endpoints
     this.app = express();
-    this.app.use(cors());
+    
+    // Enhanced CORS configuration for MCP
+    this.app.use(cors({
+      origin: '*',
+      methods: ['GET', 'POST', 'DELETE', 'OPTIONS'],
+      allowedHeaders: ['Content-Type', 'mcp-session-id', 'Accept', 'Authorization'],
+      exposedHeaders: ['mcp-session-id'], // Critical: Allow client to read session ID
+      credentials: false
+    }));
+    
     this.app.use(express.json({ limit: '50mb' }));
 
     // Health check endpoint
@@ -297,33 +315,71 @@ export class MedicalMCPServer {
         version: '2.0.0',
         transport: 'Official MCP StreamableHTTP',
         features: ['document-processing', 'medical-ner', 'vector-search', 'local-embeddings'],
+        sessions: this.sessions.size,
         timestamp: new Date().toISOString()
       });
     });
 
-    // Official MCP StreamableHTTP endpoint
+    // Official MCP StreamableHTTP endpoint with proper session management
     this.app.post('/mcp', async (req, res) => {
       try {
-        // Create StreamableHTTP transport for this request
-        const transport = new StreamableHTTPServerTransport({
-          sessionIdGenerator: () => crypto.randomUUID()
-        });
+        let sessionId = req.headers['mcp-session-id'] as string;
+        let session = sessionId ? this.sessions.get(sessionId) : undefined;
 
-        // Connect server to transport for this request
-        await this.server.connect(transport);
+        // If no session exists or session is invalid, create a new one
+        if (!session) {
+          sessionId = crypto.randomUUID();
+          
+          logger.log(`📝 Creating new MCP session: ${sessionId}`);
+          
+          const transport = new StreamableHTTPServerTransport({
+            sessionIdGenerator: () => sessionId
+          });
+
+          // Connect server to transport once per session
+          await this.server.connect(transport);
+          
+          session = {
+            transport,
+            initialized: false,
+            lastAccess: Date.now()
+          };
+          
+          this.sessions.set(sessionId, session);
+          logger.log(`✅ New session created and connected: ${sessionId}`);
+        }
+
+        // Update last access time
+        session.lastAccess = Date.now();
+
+        // Set session ID in response header (critical for client)
+        res.setHeader('mcp-session-id', sessionId);
+
+        // Check if this is an initialization notification
+        if (req.body?.method === 'notifications/initialized') {
+          session.initialized = true;
+          logger.log(`🔄 Session ${sessionId} marked as initialized`);
+        }
+
+        // Log request details for debugging
+        logger.log(`📨 Processing ${req.body?.method || 'unknown'} request for session ${sessionId}`);
+
+        // Handle the MCP request using the session's transport
+        await session.transport.handleRequest(req, res, req.body);
         
-        // Handle the MCP request using official SDK
-        await transport.handleRequest(req, res, req.body);
+        logger.log(`✅ Request processed successfully for session ${sessionId}`);
         
       } catch (error) {
         logger.error('StreamableHTTP request error:', error);
         
+        // Only send error response if headers haven't been sent
         if (!res.headersSent) {
           res.status(500).json({
             jsonrpc: '2.0',
             error: {
               code: -32603,
-              message: 'Internal server error'
+              message: 'Internal server error',
+              data: error instanceof Error ? error.message : 'Unknown error'
             },
             id: req.body?.id || null
           });
@@ -331,8 +387,35 @@ export class MedicalMCPServer {
       }
     });
 
+    // Session cleanup endpoint (optional - for client cleanup)
+    this.app.delete('/mcp', (req, res) => {
+      const sessionId = req.headers['mcp-session-id'] as string;
+      if (sessionId && this.sessions.has(sessionId)) {
+        this.sessions.delete(sessionId);
+        logger.log(`🗑️  Session cleaned up: ${sessionId}`);
+        res.status(204).send();
+      } else {
+        res.status(404).json({ error: 'Session not found' });
+      }
+    });
+
+    // Session status endpoint (for debugging)
+    this.app.get('/sessions', (req, res) => {
+      const sessionInfo = Array.from(this.sessions.entries()).map(([id, session]) => ({
+        id,
+        initialized: session.initialized,
+        lastAccess: new Date(session.lastAccess).toISOString(),
+        age: Date.now() - session.lastAccess
+      }));
+      
+      res.json({
+        totalSessions: this.sessions.size,
+        sessions: sessionInfo
+      });
+    });
+
     // Start HTTP server
-    const port = parseInt(process.env.MCP_HTTP_PORT || '3001', 10);
+    const port = parseInt(process.env.MCP_HTTP_PORT || '3005', 10);
     
     this.app.listen(port, '0.0.0.0', () => {
       logger.log('🚀 Medical MCP Server (Official StreamableHTTP) ready');
@@ -341,11 +424,39 @@ export class MedicalMCPServer {
       logger.log(`✅ StreamableHTTP Server listening on port ${port} (all interfaces)`);
       logger.log(`🌐 Health check: http://localhost:${port}/health`);
       logger.log(`🔗 MCP endpoint: http://localhost:${port}/mcp`);
-      logger.log(`📡 Transport: Official MCP SDK StreamableHTTP`);
+      logger.log(`📊 Sessions endpoint: http://localhost:${port}/sessions`);
+      logger.log(`📡 Transport: Official MCP SDK StreamableHTTP with session management`);
       logger.log(`🔧 Protocol: MCP 2024-11-05 compliant`);
+      logger.log(`🔄 Session management: Enabled`);
       
       this.logServerInfo();
     });
+
+    // Clean up expired sessions periodically (prevent memory leaks)
+    const sessionCleanupInterval = setInterval(() => {
+      this.cleanupExpiredSessions();
+    }, 300000); // Check every 5 minutes
+
+    // Store interval reference for cleanup
+    (this as any).sessionCleanupInterval = sessionCleanupInterval;
+  }
+
+  private cleanupExpiredSessions(): void {
+    const now = Date.now();
+    const sessionTimeout = 3600000; // 1 hour in milliseconds
+    let cleanedUp = 0;
+
+    for (const [sessionId, session] of this.sessions.entries()) {
+      if (now - session.lastAccess > sessionTimeout) {
+        this.sessions.delete(sessionId);
+        cleanedUp++;
+        logger.log(`🗑️  Expired session cleaned up: ${sessionId}`);
+      }
+    }
+
+    if (cleanedUp > 0) {
+      logger.log(`🧹 Cleaned up ${cleanedUp} expired sessions. Active sessions: ${this.sessions.size}`);
+    }
   }
 
   private async startStdioServer(): Promise<void> {
@@ -382,6 +493,15 @@ export class MedicalMCPServer {
       logger.log('   🔍 semanticSearchLocal - Search using local embeddings');
       
       logger.log('\n💬 The server is now ready for official MCP client connections...');
+      
+      if (isHttpMode) {
+        logger.log('\n🔧 Session Management Details:');
+        logger.log('   • Each client gets a unique session ID');
+        logger.log('   • Sessions persist across requests');
+        logger.log('   • Automatic cleanup of expired sessions');
+        logger.log('   • Session timeout: 1 hour of inactivity');
+      }
+      
     } catch (error) {
       logger.log('📊 Statistics unavailable during startup');
     }
@@ -390,6 +510,12 @@ export class MedicalMCPServer {
   async stop(): Promise<void> {
     try {
       logger.log('🛑 Shutting down Medical MCP Server...');
+      
+      // Stop session cleanup interval
+      if ((this as any).sessionCleanupInterval) {
+        clearInterval((this as any).sessionCleanupInterval);
+      }
+      
       await this.cleanup();
       logger.log('✅ Medical MCP Server stopped gracefully');
     } catch (error) {
@@ -399,6 +525,10 @@ export class MedicalMCPServer {
 
   private async cleanup(): Promise<void> {
     try {
+      // Clear all sessions
+      logger.log(`🧹 Cleaning up ${this.sessions.size} active sessions...`);
+      this.sessions.clear();
+      
       if (this.mongoClient) {
         await this.mongoClient.disconnect();
       }
@@ -418,6 +548,7 @@ export class MedicalMCPServer {
   async healthCheck(): Promise<{
     status: 'healthy' | 'unhealthy';
     services: Record<string, boolean>;
+    sessions: number;
     timestamp: string;
   }> {
     const services: Record<string, boolean> = {};
@@ -441,6 +572,7 @@ export class MedicalMCPServer {
     return {
       status: allHealthy ? 'healthy' : 'unhealthy',
       services,
+      sessions: this.sessions.size,
       timestamp: new Date().toISOString()
     };
   }
@@ -450,6 +582,7 @@ export class MedicalMCPServer {
     toolsAvailable: number;
     embeddingModel: string;
     uptime: number;
+    sessions: number;
   }> {
     try {
       const documentsCount = await this.mongoClient.countDocuments();
@@ -462,12 +595,23 @@ export class MedicalMCPServer {
         documentsCount,
         toolsAvailable: documentTools.length + medicalTools.length + localEmbeddingTools.length,
         embeddingModel: embeddingModel.model,
-        uptime: process.uptime()
+        uptime: process.uptime(),
+        sessions: this.sessions.size
       };
     } catch (error) {
       logger.error('Failed to get statistics:', error);
       throw error;
     }
+  }
+
+  // Public method to get session info (for debugging)
+  getSessionInfo(): Array<{ id: string; initialized: boolean; lastAccess: Date; age: number }> {
+    return Array.from(this.sessions.entries()).map(([id, session]) => ({
+      id,
+      initialized: session.initialized,
+      lastAccess: new Date(session.lastAccess),
+      age: Date.now() - session.lastAccess
+    }));
   }
 }
 

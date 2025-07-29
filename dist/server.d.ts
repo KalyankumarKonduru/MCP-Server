@@ -9,6 +9,7 @@ export declare class MedicalMCPServer {
     private documentTools;
     private medicalTools;
     private localEmbeddingTools;
+    private sessions;
     constructor();
     private setupHandlers;
     private handleExtractText;
@@ -17,6 +18,7 @@ export declare class MedicalMCPServer {
     private handleGetPatientSummary;
     start(): Promise<void>;
     private startStreamableHTTPServer;
+    private cleanupExpiredSessions;
     private startStdioServer;
     private logServerInfo;
     stop(): Promise<void>;
@@ -24,6 +26,7 @@ export declare class MedicalMCPServer {
     healthCheck(): Promise<{
         status: 'healthy' | 'unhealthy';
         services: Record<string, boolean>;
+        sessions: number;
         timestamp: string;
     }>;
     getStatistics(): Promise<{
@@ -31,6 +34,13 @@ export declare class MedicalMCPServer {
         toolsAvailable: number;
         embeddingModel: string;
         uptime: number;
+        sessions: number;
+    }>;
+    getSessionInfo(): Array<{
+        id: string;
+        initialized: boolean;
+        lastAccess: Date;
+        age: number;
     }>;
 }
 //# sourceMappingURL=server.d.ts.map
