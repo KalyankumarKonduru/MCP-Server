@@ -48,5 +48,20 @@ export declare class MongoDBClient {
     countDocuments(filter?: Record<string, any>): Promise<number>;
     findByMedicalEntity(entityLabel: string, limit?: number): Promise<MedicalDocument[]>;
     getPatientDocuments(patientId: string): Promise<MedicalDocument[]>;
+    /**
+     * Get documents by filter with pagination support
+     * Required by DocumentTools and MedicalTools
+     */
+    getDocumentsByFilter(filter?: Record<string, any>, limit?: number, offset?: number): Promise<MedicalDocument[]>;
+    /**
+     * Search documents using text search with filters
+     * Required by MedicalTools - returns documents directly (not SearchResult[])
+     */
+    searchDocuments(query: string, filter?: Record<string, any>, limit?: number): Promise<MedicalDocument[]>;
+    /**
+     * List documents with filtering and pagination
+     * Required by DocumentTools - alias for getDocumentsByFilter
+     */
+    listDocuments(limit?: number, offset?: number, filter?: Record<string, any>): Promise<MedicalDocument[]>;
 }
 //# sourceMappingURL=mongodb-client.d.ts.map

@@ -1,12 +1,14 @@
 import { Tool } from '@modelcontextprotocol/sdk/types.js';
 import { MongoDBClient, MedicalDocument, MedicalEntity } from '../db/mongodb-client.js';
-import { MedicalNERService } from '../services/medical-ner-service.js';
+import { BioClinicalServerConnection, BioClinicalEntity } from '../services/bioclinical-server-connection.js';
+import { EntityMappingService, MappedEntity } from '../services/entity-mapping-service.js';
 import { LocalEmbeddingService } from '../services/local-embedding-service.js';
 
 export interface ExtractMedicalEntitiesRequest {
   text: string;
   documentId?: string;
   entityTypes?: string[];
+  confidenceThreshold?: number;
 }
 
 export interface FindSimilarCasesRequest {
@@ -38,17 +40,21 @@ export interface MedicalInsightsRequest {
   limit?: number;
 }
 
+/**
+ * Medical Tools using BioClinical-Server for enhanced medical entity extraction
+ * Provides backward compatibility with legacy interfaces while using state-of-the-art models
+ */
 export class MedicalTools {
   constructor(
     private mongoClient: MongoDBClient,
-    private nerService: MedicalNERService,
+    private bioClinicalConnection: BioClinicalServerConnection,
     private embeddingService: LocalEmbeddingService
   ) {}
 
   createExtractMedicalEntitiesTool(): Tool {
     return {
       name: 'extractMedicalEntities',
-      description: 'Extract medical entities (medications, conditions, procedures, etc.) from text using advanced NER',
+      description: 'Extract medical entities (medications, conditions, procedures, etc.) from text using Clinical-AI-Apollo/Medical-NER model',
       inputSchema: {
         type: 'object',
         properties: {
@@ -66,7 +72,14 @@ export class MedicalTools {
               type: 'string',
               enum: ['MEDICATION', 'CONDITION', 'PROCEDURE', 'ANATOMY', 'SYMPTOM', 'PERSON', 'DATE', 'MEASUREMENT']
             },
-            description: 'Specific entity types to extract (default: all types)'
+            description: 'Specific entity types to extract (mapped from BioClinical types)'
+          },
+          confidenceThreshold: {
+            type: 'number',
+            minimum: 0.0,
+            maximum: 1.0,
+            default: 0.5,
+            description: 'Minimum confidence threshold for entity extraction'
           }
         },
         required: ['text']
@@ -76,59 +89,87 @@ export class MedicalTools {
 
   async handleExtractMedicalEntities(args: ExtractMedicalEntitiesRequest): Promise<any> {
     try {
-      // Extract entities from text
-      const nerResult = await this.nerService.extractEntities(args.text);
+      console.log('🧬 Extracting medical entities using BioClinical-Server...');
       
-      // Filter by entity types if specified
-      let entities = nerResult.entities;
+      // Extract entities using BioClinical server
+      const confidenceThreshold = args.confidenceThreshold || 0.5;
+      const bioClinicalResult = await this.bioClinicalConnection.extractMedicalEntities(
+        args.text,
+        confidenceThreshold
+      );
+
+      if (!bioClinicalResult.success) {
+        throw new Error(bioClinicalResult.error || 'BioClinical extraction failed');
+      }
+
+      // Map BioClinical entities to legacy format for compatibility
+      let mappedEntities = EntityMappingService.mapBioClinicalToLegacy(bioClinicalResult.entities);
+      
+      // Filter by entity types if specified (using mapped labels)
       if (args.entityTypes && args.entityTypes.length > 0) {
-        entities = entities.filter(entity => args.entityTypes!.includes(entity.label));
+        mappedEntities = mappedEntities.filter(entity => 
+          args.entityTypes!.includes(entity.label)
+        );
       }
 
       // Update document if ID provided
       if (args.documentId) {
         await this.mongoClient.updateDocument(args.documentId, {
-          medicalEntities: entities
+          medicalEntities: mappedEntities
         });
       }
 
-      // Group entities by type
-      const entitiesByType = this.nerService.getEntityStatistics(entities);
+      // Generate statistics
+      const entitiesByType = EntityMappingService.getEntityStatistics(mappedEntities);
+
+      const result = {
+        success: true,
+        entitiesFound: mappedEntities.length,
+        confidence: bioClinicalResult.confidence,
+        entitiesByType,
+        entities: mappedEntities.map(entity => ({
+          text: entity.text,
+          label: entity.label,
+          confidence: entity.confidence,
+          start: entity.start,
+          end: entity.end,
+          context: entity.context?.substring(0, 100) + ((entity.context?.length || 0) > 100 ? '...' : '')
+        })),
+        documentUpdated: !!args.documentId,
+        processingModel: 'Clinical-AI-Apollo/Medical-NER',
+        processingTimeMs: bioClinicalResult.processingTimeMs,
+        modelInfo: {
+          name: bioClinicalResult.model,
+          originalEntityTypes: ['PROBLEM', 'TREATMENT', 'TEST'],
+          mappedEntityTypes: Object.keys(entitiesByType)
+        }
+      };
 
       return {
         content: [
           {
             type: 'text',
-            text: JSON.stringify({
-              success: true,
-              entitiesFound: entities.length,
-              confidence: nerResult.confidence,
-              entitiesByType,
-              entities: entities.map(entity => ({
-                text: entity.text,
-                label: entity.label,
-                confidence: entity.confidence,
-                context: entity.context?.substring(0, 100) + '...'
-              })),
-              documentUpdated: !!args.documentId,
-              processingModel: 'advanced-medical-ner'
-            }, null, 2)
+            text: JSON.stringify(result, null, 2)
           }
         ]
       };
     } catch (error) {
+      console.error('❌ Medical entity extraction failed:', error);
+      
+      const errorResult = {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error',
+        processingModel: 'Clinical-AI-Apollo/Medical-NER',
+        timestamp: new Date().toISOString()
+      };
+      
       return {
         content: [
           {
             type: 'text',
-            text: JSON.stringify({
-              success: false,
-              error: error instanceof Error ? error.message : 'Unknown error occurred',
-              message: 'Failed to extract medical entities'
-            }, null, 2)
+            text: JSON.stringify(errorResult, null, 2)
           }
-        ],
-        isError: true
+        ]
       };
     }
   }
@@ -136,38 +177,37 @@ export class MedicalTools {
   createFindSimilarCasesTool(): Tool {
     return {
       name: 'findSimilarCases',
-      description: 'Find similar medical cases based on symptoms, conditions, or medications using local embeddings',
+      description: 'Find similar medical cases based on patient data or document content',
       inputSchema: {
         type: 'object',
         properties: {
           patientId: {
             type: 'string',
-            description: 'Patient ID to find similar cases for'
+            description: 'Patient identifier'
           },
           documentId: {
             type: 'string',
-            description: 'Document ID to find similar cases for'
+            description: 'Document identifier'
           },
           symptoms: {
             type: 'array',
             items: { type: 'string' },
-            description: 'List of symptoms to match'
+            description: 'List of symptoms'
           },
           conditions: {
             type: 'array',
             items: { type: 'string' },
-            description: 'List of conditions to match'
+            description: 'List of conditions'
           },
           medications: {
             type: 'array',
             items: { type: 'string' },
-            description: 'List of medications to match'
+            description: 'List of medications'
           },
           limit: {
             type: 'number',
-            description: 'Maximum number of similar cases to return (default: 10)',
-            minimum: 1,
-            maximum: 50
+            default: 5,
+            description: 'Maximum number of similar cases to return'
           }
         }
       }
@@ -176,88 +216,37 @@ export class MedicalTools {
 
   async handleFindSimilarCases(args: FindSimilarCasesRequest): Promise<any> {
     try {
-      let searchTerms: string[] = [];
-      let referenceDocument: MedicalDocument | null = null;
-
-      // Get reference data
-      if (args.documentId) {
-        referenceDocument = await this.mongoClient.findDocumentById(args.documentId);
-        if (referenceDocument?.medicalEntities) {
-          searchTerms = referenceDocument.medicalEntities.map(e => e.text);
-        }
-      } else if (args.patientId) {
-        const patientDocs = await this.mongoClient.getPatientDocuments(args.patientId);
-        if (patientDocs.length > 0) {
-          // Use the most recent document
-          referenceDocument = patientDocs[0];
-          if (referenceDocument?.medicalEntities) {
-            searchTerms = referenceDocument.medicalEntities.map(e => e.text);
-          }
-        }
-      }
-
-      // Add manual search terms
+      const searchTerms: string[] = [];
+      
+      // Collect search terms
       if (args.symptoms) searchTerms.push(...args.symptoms);
       if (args.conditions) searchTerms.push(...args.conditions);
       if (args.medications) searchTerms.push(...args.medications);
 
-      if (searchTerms.length === 0) {
-        throw new Error('No search criteria provided');
-      }
-
-      // Create search query and generate embedding using local model
-      const searchQuery = searchTerms.join(' ');
-      const queryEmbedding = await this.embeddingService.generateQueryEmbedding(searchQuery);
-
-      // Exclude the reference patient/document from results
-      const excludeFilter: Record<string, any> = {};
-      if (args.patientId) {
-        excludeFilter['metadata.patientId'] = { $ne: args.patientId };
-      }
-      if (args.documentId) {
-        excludeFilter['_id'] = { $ne: args.documentId };
-      }
-
-      // Search for similar cases using local embeddings
-      const similarCases = await this.mongoClient.vectorSearch(
-        queryEmbedding,
-        args.limit || 10,
-        0.3, // Lower threshold for finding similar cases
-        excludeFilter
+      // Search documents using proper MongoDB client method
+      const documents = await this.mongoClient.getDocumentsByFilter(
+        { 
+          $text: { $search: searchTerms.join(' ') },
+          ...(args.patientId && { 'metadata.patientId': args.patientId })
+        },
+        args.limit || 5
       );
 
-      // Analyze similarity reasons
-      const analyzedCases = similarCases.map(result => {
-        const commonEntities = this.findCommonEntities(
-          referenceDocument?.medicalEntities || [],
-          result.document.medicalEntities || []
-        );
-
-        return {
-          id: result.document._id,
-          title: result.document.title,
-          patientId: result.document.metadata.patientId,
-          documentType: result.document.metadata.documentType,
-          similarity: result.score,
-          commonEntities,
-          summary: result.document.content.substring(0, 300) + '...'
-        };
-      });
-
-                    return {
+      return {
         content: [
           {
             type: 'text',
             text: JSON.stringify({
               success: true,
-              embeddingModel: this.embeddingService.getModelInfo().model,
-              searchCriteria: {
-                patientId: args.patientId,
-                documentId: args.documentId,
-                searchTerms: searchTerms.slice(0, 10) // Limit for display
-              },
-              similarCasesFound: analyzedCases.length,
-              cases: analyzedCases
+              casesFound: documents.length,
+              cases: documents.map(doc => ({
+                id: doc._id,
+                title: doc.title,
+                patientId: doc.metadata.patientId,
+                documentType: doc.metadata.documentType,
+                relevantEntities: doc.medicalEntities?.slice(0, 10) || [],
+                uploadDate: doc.metadata.uploadedAt
+              }))
             }, null, 2)
           }
         ]
@@ -269,12 +258,10 @@ export class MedicalTools {
             type: 'text',
             text: JSON.stringify({
               success: false,
-              error: error instanceof Error ? error.message : 'Unknown error occurred',
-              message: 'Failed to find similar cases'
+              error: error instanceof Error ? error.message : 'Unknown error'
             }, null, 2)
           }
-        ],
-        isError: true
+        ]
       };
     }
   }
@@ -282,18 +269,19 @@ export class MedicalTools {
   createAnalyzePatientHistoryTool(): Tool {
     return {
       name: 'analyzePatientHistory',
-      description: 'Analyze patient medical history and generate insights using advanced analytics',
+      description: 'Analyze patient medical history with timeline, summary, or trend analysis',
       inputSchema: {
         type: 'object',
         properties: {
           patientId: {
             type: 'string',
-            description: 'Patient ID to analyze'
+            description: 'Patient identifier'
           },
           analysisType: {
             type: 'string',
             enum: ['timeline', 'summary', 'trends'],
-            description: 'Type of analysis to perform (default: summary)'
+            default: 'summary',
+            description: 'Type of analysis to perform'
           },
           dateRange: {
             type: 'object',
@@ -311,37 +299,18 @@ export class MedicalTools {
 
   async handleAnalyzePatientHistory(args: AnalyzePatientHistoryRequest): Promise<any> {
     try {
-      // Get patient documents
-      const patientDocs = await this.mongoClient.getPatientDocuments(args.patientId);
-      
-      if (patientDocs.length === 0) {
-        throw new Error(`No documents found for patient ${args.patientId}`);
-      }
+      const documents = await this.mongoClient.getPatientDocuments(args.patientId);
 
-      // Filter by date range if provided
-      let filteredDocs = patientDocs;
-      if (args.dateRange) {
-        const startDate = new Date(args.dateRange.start);
-        const endDate = new Date(args.dateRange.end);
-        filteredDocs = patientDocs.filter(doc => {
-          const docDate = doc.metadata.uploadedAt;
-          return docDate >= startDate && docDate <= endDate;
-        });
-      }
-
-      const analysisType = args.analysisType || 'summary';
-      let analysis: any = {};
-
-      switch (analysisType) {
+      let analysis;
+      switch (args.analysisType) {
         case 'timeline':
-          analysis = this.generateTimeline(filteredDocs);
-          break;
-        case 'summary':
-          analysis = this.generateSummary(filteredDocs);
+          analysis = this.generateTimeline(documents);
           break;
         case 'trends':
-          analysis = this.generateTrends(filteredDocs);
+          analysis = this.generateTrends(documents);
           break;
+        default:
+          analysis = this.generateSummary(documents);
       }
 
       return {
@@ -351,11 +320,9 @@ export class MedicalTools {
             text: JSON.stringify({
               success: true,
               patientId: args.patientId,
-              analysisType,
-              documentsAnalyzed: filteredDocs.length,
-              dateRange: args.dateRange,
-              analysis,
-              processingModel: 'advanced-medical-analytics'
+              analysisType: args.analysisType || 'summary',
+              documentsAnalyzed: documents.length,
+              analysis
             }, null, 2)
           }
         ]
@@ -367,20 +334,18 @@ export class MedicalTools {
             type: 'text',
             text: JSON.stringify({
               success: false,
-              error: error instanceof Error ? error.message : 'Unknown error occurred',
-              message: 'Failed to analyze patient history'
+              error: error instanceof Error ? error.message : 'Unknown error'
             }, null, 2)
           }
-        ],
-        isError: true
+        ]
       };
     }
   }
 
-  createMedicalInsightsTool(): Tool {
+  createGetMedicalInsightsTool(): Tool {
     return {
       name: 'getMedicalInsights',
-      description: 'Get medical insights and recommendations based on query and context using local embeddings',
+      description: 'Get medical insights and recommendations based on query and context',
       inputSchema: {
         type: 'object',
         properties: {
@@ -406,9 +371,8 @@ export class MedicalTools {
           },
           limit: {
             type: 'number',
-            description: 'Maximum number of insights to return (default: 5)',
-            minimum: 1,
-            maximum: 20
+            default: 10,
+            description: 'Maximum number of insights to return'
           }
         },
         required: ['query']
@@ -416,54 +380,27 @@ export class MedicalTools {
     };
   }
 
-  async handleMedicalInsights(args: MedicalInsightsRequest): Promise<any> {
+  async handleGetMedicalInsights(args: MedicalInsightsRequest): Promise<any> {
     try {
-      // Generate query embedding with context using local model
-      let contextualQuery = args.query;
-      if (args.context) {
-        const contextParts = [];
-        if (args.context.patientAge) contextParts.push(`Age: ${args.context.patientAge}`);
-        if (args.context.gender) contextParts.push(`Gender: ${args.context.gender}`);
-        if (args.context.conditions) contextParts.push(`Conditions: ${args.context.conditions.join(', ')}`);
-        if (args.context.medications) contextParts.push(`Medications: ${args.context.medications.join(', ')}`);
-        
-        if (contextParts.length > 0) {
-          contextualQuery = `${contextParts.join('; ')}. Query: ${args.query}`;
-        }
-      }
-
-      const queryEmbedding = await this.embeddingService.generateQueryEmbedding(contextualQuery);
-
-      // Search for relevant documents using local embeddings
-      const relevantDocs = await this.mongoClient.vectorSearch(
-        queryEmbedding,
-        args.limit || 5,
-        0.6
+      // Search for relevant documents using proper method
+      const documents = await this.mongoClient.getDocumentsByFilter(
+        { $text: { $search: args.query } },
+        args.limit || 10
       );
-
-      // Generate insights from relevant documents
-      const insights = relevantDocs.map(result => {
-        const doc = result.document;
-        const relevantEntities = doc.medicalEntities?.filter(entity => 
-          args.query.toLowerCase().includes(entity.text.toLowerCase()) ||
-          (args.context?.conditions && args.context.conditions.some(condition => 
-            entity.text.toLowerCase().includes(condition.toLowerCase())
-          )) ||
-          (args.context?.medications && args.context.medications.some(medication => 
-            entity.text.toLowerCase().includes(medication.toLowerCase())
-          ))
-        ) || [];
-
+      
+      // Extract insights from documents
+      const insights = documents.map((doc: any) => {
+        const relevantSentences = this.extractInsight(doc.content, args.query);
         return {
           documentId: doc._id,
           title: doc.title,
-          relevanceScore: result.score,
-          documentType: doc.metadata.documentType,
-          insight: this.extractInsight(doc.content, args.query),
-          relevantEntities: relevantEntities.slice(0, 5),
-          patientContext: doc.metadata.patientId ? 'Similar case' : 'General reference'
+          insight: relevantSentences,
+          relevantEntities: doc.medicalEntities?.filter((entity: any) => 
+            entity.text.toLowerCase().includes(args.query.toLowerCase())
+          ) || [],
+          confidence: this.calculateRelevanceScore(doc.content, args.query)
         };
-      });
+      }).filter((insight: any) => insight.insight.length > 0);
 
       return {
         content: [
@@ -472,10 +409,8 @@ export class MedicalTools {
             text: JSON.stringify({
               success: true,
               query: args.query,
-              context: args.context,
-              embeddingModel: this.embeddingService.getModelInfo().model,
               insightsFound: insights.length,
-              insights
+              insights: insights.slice(0, args.limit || 10)
             }, null, 2)
           }
         ]
@@ -487,52 +422,24 @@ export class MedicalTools {
             type: 'text',
             text: JSON.stringify({
               success: false,
-              error: error instanceof Error ? error.message : 'Unknown error occurred',
-              message: 'Failed to get medical insights'
+              error: error instanceof Error ? error.message : 'Unknown error'
             }, null, 2)
           }
-        ],
-        isError: true
+        ]
       };
     }
   }
 
-  private findCommonEntities(entities1: MedicalEntity[], entities2: MedicalEntity[]): Array<{
-    text: string;
-    label: string;
-    frequency: number;
-  }> {
-    const commonEntities = new Map<string, { label: string; frequency: number }>();
-
-    entities1.forEach(entity1 => {
-      entities2.forEach(entity2 => {
-        if (entity1.text.toLowerCase() === entity2.text.toLowerCase() && 
-            entity1.label === entity2.label) {
-          const key = `${entity1.text.toLowerCase()}-${entity1.label}`;
-          const existing = commonEntities.get(key);
-          commonEntities.set(key, {
-            label: entity1.label,
-            frequency: (existing?.frequency || 0) + 1
-          });
-        }
-      });
-    });
-
-    return Array.from(commonEntities.entries()).map(([key, value]) => ({
-      text: key.split('-')[0],
-      label: value.label,
-      frequency: value.frequency
-    }));
-  }
+  // Helper methods using EntityMappingService for compatibility
 
   private generateTimeline(documents: MedicalDocument[]): any {
     const timeline = documents
       .sort((a, b) => a.metadata.uploadedAt.getTime() - b.metadata.uploadedAt.getTime())
       .map(doc => ({
-        date: doc.metadata.uploadedAt.toISOString().split('T')[0],
+        date: doc.metadata.uploadedAt,
         documentType: doc.metadata.documentType,
         title: doc.title,
-        keyEntities: doc.medicalEntities?.slice(0, 5).map(e => e.text) || []
+        entities: doc.medicalEntities?.map(e => e.text) || []
       }));
 
     return { timeline };
@@ -540,11 +447,11 @@ export class MedicalTools {
 
   private generateSummary(documents: MedicalDocument[]): any {
     const allEntities = documents.flatMap(doc => doc.medicalEntities || []);
-    const entityStats = this.nerService.getEntityStatistics(allEntities);
+    const entityStats = EntityMappingService.getEntityStatistics(allEntities);
     
-    const conditions = this.nerService.filterEntitiesByType(allEntities, 'CONDITION');
-    const medications = this.nerService.filterEntitiesByType(allEntities, 'MEDICATION');
-    const procedures = this.nerService.filterEntitiesByType(allEntities, 'PROCEDURE');
+    const conditions = EntityMappingService.filterEntitiesByType(allEntities, 'CONDITION');
+    const medications = EntityMappingService.filterEntitiesByType(allEntities, 'MEDICATION');
+    const procedures = EntityMappingService.filterEntitiesByType(allEntities, 'PROCEDURE');
 
     return {
       totalDocuments: documents.length,
@@ -557,11 +464,10 @@ export class MedicalTools {
   }
 
   private generateTrends(documents: MedicalDocument[]): any {
-    // Group documents by month
     const monthlyData = new Map<string, MedicalDocument[]>();
     
     documents.forEach(doc => {
-      const monthKey = doc.metadata.uploadedAt.toISOString().substring(0, 7); // YYYY-MM
+      const monthKey = doc.metadata.uploadedAt.toISOString().substring(0, 7);
       if (!monthlyData.has(monthKey)) {
         monthlyData.set(monthKey, []);
       }
@@ -570,8 +476,8 @@ export class MedicalTools {
 
     const trends = Array.from(monthlyData.entries()).map(([month, docs]) => {
       const allEntities = docs.flatMap(doc => doc.medicalEntities || []);
-      const conditions = this.nerService.filterEntitiesByType(allEntities, 'CONDITION');
-      const medications = this.nerService.filterEntitiesByType(allEntities, 'MEDICATION');
+      const conditions = EntityMappingService.filterEntitiesByType(allEntities, 'CONDITION');
+      const medications = EntityMappingService.filterEntitiesByType(allEntities, 'MEDICATION');
 
       return {
         month,
@@ -595,7 +501,7 @@ export class MedicalTools {
     return distribution;
   }
 
-  private getTopEntities(entities: MedicalEntity[], limit: number): Array<{ text: string; count: number }> {
+  private getTopEntities(entities: MappedEntity[], limit: number): Array<{ text: string; count: number }> {
     const entityCounts = new Map<string, number>();
     
     entities.forEach(entity => {
@@ -610,23 +516,37 @@ export class MedicalTools {
   }
 
   private extractInsight(content: string, query: string): string {
-    // Simple insight extraction - find sentences containing query terms
-    const sentences = content.split(/[.!?]+/);
+    const sentences = content.split(/[.!?]+/).filter(s => s.trim().length > 0);
     const queryTerms = query.toLowerCase().split(/\s+/);
     
-    const relevantSentences = sentences.filter(sentence => 
-      queryTerms.some(term => sentence.toLowerCase().includes(term))
-    );
+    const relevantSentences = sentences.filter(sentence => {
+      const lowerSentence = sentence.toLowerCase();
+      return queryTerms.some(term => lowerSentence.includes(term));
+    });
 
-    return relevantSentences.slice(0, 2).join('. ').trim() + '.';
+    return relevantSentences.slice(0, 3).join('. ').trim();
   }
 
+  private calculateRelevanceScore(content: string, query: string): number {
+    const queryTerms = query.toLowerCase().split(/\s+/);
+    const contentLower = content.toLowerCase();
+    
+    let score = 0;
+    queryTerms.forEach(term => {
+      const matches = (contentLower.match(new RegExp(term, 'g')) || []).length;
+      score += matches;
+    });
+
+    return Math.min(score / queryTerms.length / 10, 1); // Normalize to 0-1
+  }
+
+  // Method to get all tools for server registration
   getAllTools(): Tool[] {
     return [
       this.createExtractMedicalEntitiesTool(),
       this.createFindSimilarCasesTool(),
       this.createAnalyzePatientHistoryTool(),
-      this.createMedicalInsightsTool()
+      this.createGetMedicalInsightsTool()
     ];
   }
 }

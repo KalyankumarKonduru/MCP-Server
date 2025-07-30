@@ -303,5 +303,47 @@ export class MongoDBClient {
             throw error;
         }
     }
+    // ====== MISSING METHODS REQUIRED BY UPDATED TOOLS ======
+    /**
+     * Get documents by filter with pagination support
+     * Required by DocumentTools and MedicalTools
+     */
+    async getDocumentsByFilter(filter = {}, limit = 20, offset = 0) {
+        // Use existing findDocuments method
+        return await this.findDocuments(filter, limit, offset);
+    }
+    /**
+     * Search documents using text search with filters
+     * Required by MedicalTools - returns documents directly (not SearchResult[])
+     */
+    async searchDocuments(query, filter, limit = 10) {
+        try {
+            // Use existing textSearch but return just documents
+            const searchResults = await this.textSearch(query, limit, filter);
+            return searchResults.map(result => result.document);
+        }
+        catch (error) {
+            console.error('❌ Document search failed:', error);
+            // Fallback to basic filter-based search
+            const basicFilter = {};
+            if (query) {
+                basicFilter.$or = [
+                    { title: { $regex: query, $options: 'i' } },
+                    { content: { $regex: query, $options: 'i' } }
+                ];
+            }
+            if (filter) {
+                Object.assign(basicFilter, filter);
+            }
+            return await this.findDocuments(basicFilter, limit);
+        }
+    }
+    /**
+     * List documents with filtering and pagination
+     * Required by DocumentTools - alias for getDocumentsByFilter
+     */
+    async listDocuments(limit = 20, offset = 0, filter) {
+        return await this.getDocumentsByFilter(filter || {}, limit, offset);
+    }
 }
 //# sourceMappingURL=mongodb-client.js.map

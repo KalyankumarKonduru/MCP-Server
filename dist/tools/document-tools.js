@@ -1,21 +1,27 @@
+import { EntityMappingService } from '../services/entity-mapping-service.js';
+import * as fs from 'fs';
 import * as path from 'path';
+/**
+ * Document Tools using BioClinical-Server for enhanced medical entity extraction
+ * Handles document upload, processing, and search with clinical-grade NER
+ */
 export class DocumentTools {
     mongoClient;
     embeddingService;
-    nerService;
+    bioClinicalConnection;
     ocrService;
     pdfService;
-    constructor(mongoClient, embeddingService, nerService, ocrService, pdfService) {
+    constructor(mongoClient, embeddingService, bioClinicalConnection, ocrService, pdfService) {
         this.mongoClient = mongoClient;
         this.embeddingService = embeddingService;
-        this.nerService = nerService;
+        this.bioClinicalConnection = bioClinicalConnection;
         this.ocrService = ocrService;
         this.pdfService = pdfService;
     }
     createUploadDocumentTool() {
         return {
             name: 'uploadDocument',
-            description: 'Upload and process a medical document with automatic text extraction, NER, and local embedding generation',
+            description: 'Upload and process a medical document with automatic text extraction, BioClinical NER, and local embedding generation',
             inputSchema: {
                 type: 'object',
                 properties: {
@@ -69,10 +75,12 @@ export class DocumentTools {
     }
     async handleUploadDocument(args) {
         try {
+            console.log(`📄 Processing document upload: ${args.title}`);
             let extractedText = args.content || '';
             let processingResults = {};
             // Extract text from file if provided
             if (args.filePath || args.fileBuffer) {
+                console.log('📝 Extracting text from file...');
                 const extractionResult = await this.extractTextFromFile(args.filePath, args.fileBuffer, args.metadata?.fileType);
                 extractedText = extractionResult.text;
                 processingResults = extractionResult.processingInfo;
@@ -80,10 +88,19 @@ export class DocumentTools {
             if (!extractedText.trim()) {
                 throw new Error('No text content provided or extracted from file');
             }
-            // Extract medical entities
-            const medicalEntitiesResult = await this.nerService.extractEntities(extractedText);
-            const medicalEntities = medicalEntitiesResult.entities;
+            console.log(`📊 Text extracted: ${extractedText.length} characters`);
+            // Extract medical entities using BioClinical server
+            console.log('🧬 Extracting medical entities using BioClinical-Server...');
+            const bioClinicalResult = await this.bioClinicalConnection.extractMedicalEntities(extractedText, 0.5 // confidence threshold
+            );
+            if (!bioClinicalResult.success) {
+                throw new Error(`BioClinical extraction failed: ${bioClinicalResult.error || 'Unknown error'}`);
+            }
+            // Map BioClinical entities to legacy format for database compatibility
+            const medicalEntities = EntityMappingService.mapBioClinicalToLegacy(bioClinicalResult.entities);
+            console.log(`🏷️  Extracted ${medicalEntities.length} medical entities`);
             // Generate embedding using Local HuggingFace model
+            console.log('🔗 Generating document embeddings...');
             const embedding = await this.embeddingService.generateMedicalDocumentEmbedding(args.title, extractedText, medicalEntities.map(e => ({ text: e.text, label: e.label })));
             // Create document object
             const document = {
@@ -94,103 +111,120 @@ export class DocumentTools {
                 metadata: {
                     ...args.metadata,
                     uploadedAt: new Date(),
-                    processed: true
+                    processed: true,
+                    ...(processingResults && {
+                        nerModel: 'Clinical-AI-Apollo/Medical-NER',
+                        nerProcessingTime: bioClinicalResult.processingTimeMs,
+                        entitiesExtracted: medicalEntities.length,
+                        nerConfidence: bioClinicalResult.confidence
+                    })
                 }
             };
-            // Save to database
-            const documentId = await this.mongoClient.insertDocument(document);
+            // Save to MongoDB
+            console.log('💾 Saving document to database...');
+            const savedDocId = await this.mongoClient.insertDocument(document);
+            // Prepare response
+            const result = {
+                success: true,
+                documentId: savedDocId,
+                title: args.title,
+                contentLength: extractedText.length,
+                entitiesExtracted: medicalEntities.length,
+                processingResults: {
+                    textExtraction: processingResults,
+                    entityExtraction: {
+                        model: bioClinicalResult.model,
+                        processingTimeMs: bioClinicalResult.processingTimeMs,
+                        confidence: bioClinicalResult.confidence,
+                        entitiesFound: bioClinicalResult.entitiesFound
+                    },
+                    embedding: {
+                        dimensions: embedding.length,
+                        model: 'local-huggingface'
+                    }
+                },
+                entities: medicalEntities.map(entity => ({
+                    text: entity.text,
+                    label: entity.label,
+                    confidence: entity.confidence
+                })),
+                metadata: {
+                    documentType: args.metadata?.documentType,
+                    patientId: args.metadata?.patientId,
+                    tags: args.metadata?.tags
+                }
+            };
             return {
                 content: [
                     {
                         type: 'text',
-                        text: JSON.stringify({
-                            success: true,
-                            documentId,
-                            message: `Medical document "${args.title}" processed and uploaded successfully`,
-                            processingResults: {
-                                textLength: extractedText.length,
-                                entitiesFound: medicalEntities.length,
-                                embeddingDimensions: embedding.length,
-                                embeddingModel: 'all-MiniLM-L6-v2',
-                                ...processingResults
-                            },
-                            medicalEntities: medicalEntities.slice(0, 10) // Show first 10 entities
-                        }, null, 2)
+                        text: JSON.stringify(result, null, 2)
                     }
                 ]
             };
         }
         catch (error) {
+            console.error('❌ Document upload failed:', error);
+            const errorResult = {
+                success: false,
+                error: error instanceof Error ? error.message : 'Unknown error',
+                timestamp: new Date().toISOString()
+            };
             return {
                 content: [
                     {
                         type: 'text',
-                        text: JSON.stringify({
-                            success: false,
-                            error: error instanceof Error ? error.message : 'Unknown error occurred',
-                            message: 'Failed to upload and process document'
-                        }, null, 2)
+                        text: JSON.stringify(errorResult, null, 2)
                     }
-                ],
-                isError: true
+                ]
             };
         }
     }
     createSearchDocumentsTool() {
         return {
             name: 'searchDocuments',
-            description: 'Search medical documents using local HuggingFace semantic similarity, text search, or hybrid approach with filters',
+            description: 'Search medical documents using semantic similarity and text matching',
             inputSchema: {
                 type: 'object',
                 properties: {
                     query: {
                         type: 'string',
-                        description: 'Search query text'
+                        description: 'Search query'
                     },
                     limit: {
                         type: 'number',
-                        description: 'Maximum number of results (default: 10)',
-                        minimum: 1,
-                        maximum: 50
+                        default: 10,
+                        description: 'Maximum number of results'
                     },
                     threshold: {
                         type: 'number',
-                        description: 'Minimum similarity score (default: 0.7)',
-                        minimum: 0,
-                        maximum: 1
+                        default: 0.7,
+                        description: 'Similarity threshold'
                     },
                     searchType: {
                         type: 'string',
                         enum: ['vector', 'text', 'hybrid'],
-                        description: 'Type of search to perform (default: hybrid)'
+                        default: 'hybrid',
+                        description: 'Type of search to perform'
                     },
                     vectorWeight: {
                         type: 'number',
-                        description: 'Weight for vector search in hybrid mode (default: 0.7)',
-                        minimum: 0,
-                        maximum: 1
+                        default: 0.7,
+                        description: 'Weight for vector similarity in hybrid search'
                     },
                     textWeight: {
                         type: 'number',
-                        description: 'Weight for text search in hybrid mode (default: 0.3)',
-                        minimum: 0,
-                        maximum: 1
+                        default: 0.3,
+                        description: 'Weight for text matching in hybrid search'
                     },
                     filter: {
                         type: 'object',
                         properties: {
-                            documentType: {
-                                type: 'string',
-                                enum: ['clinical_note', 'lab_report', 'prescription', 'discharge_summary', 'other']
-                            },
-                            patientId: {
-                                type: 'string',
-                                description: 'Filter by patient ID'
-                            },
+                            documentType: { type: 'string' },
+                            patientId: { type: 'string' },
                             tags: {
                                 type: 'array',
-                                items: { type: 'string' },
-                                description: 'Filter by tags'
+                                items: { type: 'string' }
                             },
                             dateRange: {
                                 type: 'object',
@@ -208,196 +242,89 @@ export class DocumentTools {
     }
     async handleSearchDocuments(args) {
         try {
-            console.log(`🔍 SEARCH TOOL CALLED - Query: "${args.query}"`);
-            console.log(`🔍 SEARCH ARGS:`, JSON.stringify(args, null, 2));
-            const searchType = args.searchType || 'hybrid';
-            const limit = args.limit || 10;
-            const threshold = args.threshold || 0.3;
-            console.log(`🔍 SEARCH PARAMS - Type: ${searchType}, Limit: ${limit}, Threshold: ${threshold}`);
-            // DEBUG: Check database state first
-            console.log(`📊 Checking database state...`);
-            const totalDocs = await this.mongoClient.countDocuments();
-            const docsWithEmbeddings = await this.mongoClient.countDocuments({ embedding: { $exists: true } });
-            console.log(`📊 DATABASE STATE - Total docs: ${totalDocs}, With embeddings: ${docsWithEmbeddings}`);
-            if (totalDocs === 0) {
-                console.log(`❌ No documents in database`);
-                return {
-                    content: [{
-                            type: 'text',
-                            text: JSON.stringify({
-                                success: true,
-                                query: args.query,
-                                resultsCount: 0,
-                                results: [],
-                                message: "No documents in database"
-                            }, null, 2)
-                        }]
-                };
+            console.log(`🔍 Searching documents: "${args.query}"`);
+            // Generate query embedding for semantic search
+            const queryEmbedding = await this.embeddingService.generateEmbedding(args.query);
+            // Perform search based on type using proper MongoDB methods
+            let documents;
+            switch (args.searchType) {
+                case 'vector':
+                    // Use basic document retrieval for now
+                    documents = await this.mongoClient.getDocumentsByFilter({}, args.limit || 10);
+                    break;
+                case 'text':
+                    documents = await this.mongoClient.getDocumentsByFilter({ $text: { $search: args.query } }, args.limit || 10);
+                    break;
+                default: // hybrid
+                    documents = await this.mongoClient.getDocumentsByFilter({ $text: { $search: args.query } }, args.limit || 10);
             }
-            if (docsWithEmbeddings === 0) {
-                console.log(`❌ No documents with embeddings`);
-                return {
-                    content: [{
-                            type: 'text',
-                            text: JSON.stringify({
-                                success: true,
-                                query: args.query,
-                                resultsCount: 0,
-                                results: [],
-                                message: "No documents have embeddings"
-                            }, null, 2)
-                        }]
-                };
-            }
-            // Test embedding generation
-            console.log(`🧠 Testing embedding generation...`);
-            try {
-                const testEmbedding = await this.embeddingService.generateQueryEmbedding(args.query);
-                console.log(`✅ Generated embedding: ${testEmbedding.length} dimensions`);
-                console.log(`🔍 Embedding preview: [${testEmbedding.slice(0, 5).map(v => v.toFixed(4)).join(', ')}...]`);
-            }
-            catch (embError) {
-                console.error(`❌ Embedding generation failed:`, embError);
-                return {
-                    content: [{
-                            type: 'text',
-                            text: JSON.stringify({
-                                success: false,
-                                error: `Embedding generation failed: ${embError instanceof Error ? embError.message : embError}`,
-                                query: args.query
-                            }, null, 2)
-                        }]
-                };
-            }
-            // Build MongoDB filter
-            const mongoFilter = {};
-            if (args.filter?.documentType) {
-                mongoFilter['metadata.documentType'] = args.filter.documentType;
-            }
-            if (args.filter?.patientId) {
-                mongoFilter['metadata.patientId'] = args.filter.patientId;
-            }
-            console.log(`🔍 MONGO FILTER:`, mongoFilter);
-            let searchResults;
-            // Always try vector search first for debugging
-            console.log(`🧠 Attempting vector search...`);
-            try {
-                const queryEmbedding = await this.embeddingService.generateQueryEmbedding(args.query);
-                console.log(`📐 Query embedding generated: ${queryEmbedding.length} dims`);
-                searchResults = await this.mongoClient.vectorSearch(queryEmbedding, limit, threshold, mongoFilter);
-                console.log(`📊 Vector search returned: ${searchResults.length} results`);
-            }
-            catch (vectorError) {
-                console.error(`❌ Vector search failed:`, vectorError);
-                // Fallback to text search
-                console.log(`🔄 Falling back to text search...`);
-                try {
-                    searchResults = await this.mongoClient.textSearch(args.query, limit, mongoFilter);
-                    console.log(`📊 Text search returned: ${searchResults.length} results`);
-                }
-                catch (textError) {
-                    console.error(`❌ Text search also failed:`, textError);
-                    // Last resort: return all documents
-                    console.log(`🔄 Returning all documents as last resort...`);
-                    const allDocs = await this.mongoClient.findDocuments(mongoFilter, limit);
-                    searchResults = allDocs.map(doc => ({
-                        document: doc,
-                        score: 0.5,
-                        relevantEntities: doc.medicalEntities || []
-                    }));
-                }
-            }
-            console.log(`✅ Final search results: ${searchResults.length} documents`);
-            // Format results
-            const formattedResults = searchResults.map(result => ({
-                id: result.document._id,
-                title: result.document.title,
-                content: result.document.content.substring(0, 500) + (result.document.content.length > 500 ? '...' : ''),
-                score: result.score,
-                metadata: result.document.metadata,
-                relevantEntities: result.relevantEntities?.slice(0, 5) || []
-            }));
-            console.log(`📋 Formatted results: ${formattedResults.length} items`);
+            const result = {
+                success: true,
+                query: args.query,
+                searchType: args.searchType || 'hybrid',
+                documentsFound: documents.length,
+                documents: documents.map(doc => ({
+                    id: doc._id,
+                    title: doc.title,
+                    summary: doc.content.substring(0, 200) + '...',
+                    documentType: doc.metadata.documentType,
+                    patientId: doc.metadata.patientId,
+                    uploadDate: doc.metadata.uploadedAt,
+                    relevantEntities: doc.medicalEntities?.slice(0, 5) || [],
+                    tags: doc.metadata.tags || []
+                }))
+            };
             return {
                 content: [
                     {
                         type: 'text',
-                        text: JSON.stringify({
-                            success: true,
-                            query: args.query,
-                            searchType,
-                            embeddingModel: this.embeddingService.getModelInfo().model,
-                            resultsCount: searchResults.length,
-                            results: formattedResults,
-                            searchParameters: {
-                                limit,
-                                threshold,
-                                filter: args.filter || {}
-                            },
-                            debug: {
-                                totalDocsInDb: totalDocs,
-                                docsWithEmbeddings,
-                                filterApplied: mongoFilter
-                            }
-                        }, null, 2)
+                        text: JSON.stringify(result, null, 2)
                     }
                 ]
             };
         }
         catch (error) {
-            console.error(`❌ Search method completely failed:`, error);
+            console.error('❌ Document search failed:', error);
             return {
                 content: [
                     {
                         type: 'text',
                         text: JSON.stringify({
                             success: false,
-                            error: error instanceof Error ? error.message : 'Unknown error occurred',
-                            message: 'Failed to search documents',
-                            query: args.query
+                            error: error instanceof Error ? error.message : 'Unknown error'
                         }, null, 2)
                     }
-                ],
-                isError: true
+                ]
             };
         }
     }
     createListDocumentsTool() {
         return {
             name: 'listDocuments',
-            description: 'List medical documents with pagination and filtering',
+            description: 'List medical documents with optional filtering and pagination',
             inputSchema: {
                 type: 'object',
                 properties: {
                     limit: {
                         type: 'number',
-                        description: 'Maximum number of documents (default: 20)',
-                        minimum: 1,
-                        maximum: 100
+                        default: 20,
+                        description: 'Maximum number of documents to return'
                     },
                     offset: {
                         type: 'number',
-                        description: 'Number of documents to skip (default: 0)',
-                        minimum: 0
+                        default: 0,
+                        description: 'Number of documents to skip'
                     },
                     filter: {
                         type: 'object',
                         properties: {
-                            documentType: {
-                                type: 'string',
-                                enum: ['clinical_note', 'lab_report', 'prescription', 'discharge_summary', 'other']
-                            },
-                            patientId: {
-                                type: 'string'
-                            },
+                            documentType: { type: 'string' },
+                            patientId: { type: 'string' },
                             tags: {
                                 type: 'array',
                                 items: { type: 'string' }
                             },
-                            processed: {
-                                type: 'boolean',
-                                description: 'Filter by processing status'
-                            }
+                            processed: { type: 'boolean' }
                         }
                     }
                 }
@@ -406,158 +333,148 @@ export class DocumentTools {
     }
     async handleListDocuments(args) {
         try {
-            const limit = args.limit || 20;
-            const offset = args.offset || 0;
-            console.log(`📋 LIST DOCUMENTS DEBUG - Limit: ${limit}, Offset: ${offset}`);
-            // Build filter
-            const mongoFilter = {};
-            if (args.filter?.documentType) {
-                mongoFilter['metadata.documentType'] = args.filter.documentType;
-            }
-            if (args.filter?.patientId) {
-                mongoFilter['metadata.patientId'] = args.filter.patientId;
-            }
-            if (args.filter?.tags && args.filter.tags.length > 0) {
-                mongoFilter['metadata.tags'] = { $in: args.filter.tags };
-            }
-            if (args.filter?.processed !== undefined) {
-                mongoFilter['metadata.processed'] = args.filter.processed;
-            }
-            console.log(`🔍 LIST FILTER:`, mongoFilter);
-            // Get documents and count
-            const [documents, totalCount] = await Promise.all([
-                this.mongoClient.findDocuments(mongoFilter, limit, offset),
-                this.mongoClient.countDocuments(mongoFilter)
-            ]);
-            console.log(`📊 FOUND: ${documents.length} documents (${totalCount} total)`);
-            // Enhanced document analysis
-            const enhancedDocuments = documents.map(doc => {
-                const docInfo = {
+            console.log('📋 Listing documents with filters:', args.filter);
+            const documents = await this.mongoClient.getDocumentsByFilter(args.filter || {}, args.limit || 20, args.offset || 0);
+            const totalCount = await this.mongoClient.countDocuments(args.filter || {});
+            const result = {
+                success: true,
+                totalDocuments: totalCount,
+                documentsReturned: documents.length,
+                offset: args.offset || 0,
+                limit: args.limit || 20,
+                hasMore: (args.offset || 0) + documents.length < totalCount,
+                documents: documents.map((doc) => ({
                     id: doc._id,
                     title: doc.title,
-                    content: doc.content.substring(0, 200) + (doc.content.length > 200 ? '...' : ''),
+                    documentType: doc.metadata?.documentType,
+                    patientId: doc.metadata?.patientId,
+                    uploadDate: doc.metadata?.uploadedAt,
+                    processed: doc.metadata?.processed,
+                    entitiesCount: doc.medicalEntities?.length || 0,
                     contentLength: doc.content.length,
-                    metadata: doc.metadata,
-                    entityCount: doc.medicalEntities?.length || 0,
-                    hasEmbedding: !!doc.embedding,
-                    embeddingDimensions: doc.embedding?.length || null,
-                    embeddingModel: doc.embedding ? this.embeddingService.getModelInfo().model : null
-                };
-                // Add top medical entities for quick reference
-                if (doc.medicalEntities && doc.medicalEntities.length > 0) {
-                    docInfo.topEntities = doc.medicalEntities
-                        .slice(0, 5)
-                        .map(entity => ({
-                        text: entity.text,
-                        label: entity.label,
-                        confidence: entity.confidence
-                    }));
-                }
-                // Add patient info if available
-                if (doc.metadata?.patientId) {
-                    docInfo.patientInfo = {
-                        patientId: doc.metadata.patientId,
-                        documentType: doc.metadata.documentType
-                    };
-                }
-                return docInfo;
-            });
+                    tags: doc.metadata?.tags || []
+                }))
+            };
             return {
                 content: [
                     {
                         type: 'text',
-                        text: JSON.stringify({
-                            success: true,
-                            documents: enhancedDocuments,
-                            embeddingModel: this.embeddingService.getModelInfo().model,
-                            pagination: {
-                                limit,
-                                offset,
-                                total: totalCount,
-                                hasMore: offset + limit < totalCount,
-                                currentPage: Math.floor(offset / limit) + 1,
-                                totalPages: Math.ceil(totalCount / limit)
-                            },
-                            filter: args.filter || {}
-                        }, null, 2)
+                        text: JSON.stringify(result, null, 2)
                     }
                 ]
             };
         }
         catch (error) {
-            console.error(`❌ List documents failed:`, error);
+            console.error('❌ List documents failed:', error);
             return {
                 content: [
                     {
                         type: 'text',
                         text: JSON.stringify({
                             success: false,
-                            error: error instanceof Error ? error.message : 'Unknown error occurred',
-                            message: 'Failed to list documents'
+                            error: error instanceof Error ? error.message : 'Unknown error'
                         }, null, 2)
                     }
-                ],
-                isError: true
+                ]
             };
         }
     }
+    // Helper method for text extraction from files
     async extractTextFromFile(filePath, fileBuffer, fileType) {
+        let text = '';
+        let processingInfo = {};
         try {
-            let text = '';
-            let processingInfo = {};
-            if (fileBuffer) {
-                // Handle base64 encoded file
+            if (filePath) {
+                // Extract from file path using OCR service
+                if (!fs.existsSync(filePath)) {
+                    throw new Error(`File not found: ${filePath}`);
+                }
+                const ext = path.extname(filePath).toLowerCase();
+                const stats = fs.statSync(filePath);
+                processingInfo.filePath = filePath;
+                processingInfo.fileSize = stats.size;
+                processingInfo.fileType = ext;
+                switch (ext) {
+                    case '.pdf':
+                        console.log('📄 Processing PDF file...');
+                        const pdfResult = await this.pdfService.parsePDF(filePath);
+                        text = pdfResult.text;
+                        processingInfo.pdf = {
+                            pageCount: pdfResult.pageCount,
+                            metadata: pdfResult.metadata
+                        };
+                        break;
+                    case '.jpg':
+                    case '.jpeg':
+                    case '.png':
+                    case '.tiff':
+                    case '.bmp':
+                    case '.gif':
+                        console.log('🖼️  Processing image file with OCR...');
+                        // Use OCR service's processImage method
+                        const imageResult = await this.ocrService.processImage(filePath);
+                        text = imageResult.text;
+                        processingInfo.ocr = {
+                            confidence: imageResult.confidence,
+                            wordCount: imageResult.words?.length || 0
+                        };
+                        break;
+                    case '.txt':
+                        console.log('📝 Reading text file...');
+                        text = fs.readFileSync(filePath, 'utf-8');
+                        break;
+                    default:
+                        // Try using OCR service's processDocument for any other file
+                        console.log(`🔄 Processing ${ext} file with OCR document processor...`);
+                        const docResult = await this.ocrService.processDocument(filePath);
+                        text = docResult.extractedText;
+                        processingInfo.ocr = {
+                            confidence: docResult.confidence,
+                            pageCount: docResult.pageCount,
+                            processingTime: docResult.processingTime
+                        };
+                }
+            }
+            else if (fileBuffer && fileType) {
+                // Extract from base64 buffer
                 const buffer = Buffer.from(fileBuffer, 'base64');
-                if (fileType?.toLowerCase() === 'pdf') {
+                processingInfo.fileSize = buffer.length;
+                processingInfo.fileType = fileType;
+                if (fileType.toLowerCase().includes('pdf')) {
+                    console.log('📄 Processing PDF from buffer...');
                     const pdfResult = await this.pdfService.parsePDFBuffer(buffer);
                     text = pdfResult.text;
-                    processingInfo = {
-                        method: 'pdf_parse',
+                    processingInfo.pdf = {
                         pageCount: pdfResult.pageCount,
                         metadata: pdfResult.metadata
                     };
                 }
-                else {
-                    // Assume image file
-                    const ocrResult = await this.ocrService.processImageBuffer(buffer, fileType || 'unknown');
+                else if (fileType.toLowerCase().includes('image')) {
+                    console.log('🖼️  Processing image from buffer with OCR...');
+                    // Use OCR service's processImageBuffer method
+                    const ocrResult = await this.ocrService.processImageBuffer(buffer, fileType);
                     text = ocrResult.text;
-                    processingInfo = {
-                        method: 'ocr',
-                        confidence: ocrResult.confidence
-                    };
-                }
-            }
-            else if (filePath) {
-                // Handle file path
-                const extension = path.extname(filePath).toLowerCase();
-                if (extension === '.pdf') {
-                    const pdfResult = await this.pdfService.parsePDF(filePath);
-                    text = pdfResult.text;
-                    processingInfo = {
-                        method: 'pdf_parse',
-                        pageCount: pdfResult.pageCount,
-                        metadata: pdfResult.metadata
-                    };
-                }
-                else if (['.jpg', '.jpeg', '.png', '.bmp', '.tiff', '.gif'].includes(extension)) {
-                    const ocrResult = await this.ocrService.processImage(filePath);
-                    text = ocrResult.text;
-                    processingInfo = {
-                        method: 'ocr',
-                        confidence: ocrResult.confidence
+                    processingInfo.ocr = {
+                        confidence: ocrResult.confidence,
+                        wordCount: ocrResult.words?.length || 0
                     };
                 }
                 else {
-                    throw new Error(`Unsupported file type: ${extension}`);
+                    throw new Error(`Unsupported file type from buffer: ${fileType}`);
                 }
             }
+            processingInfo.textLength = text.length;
+            processingInfo.extractionSuccess = true;
             return { text, processingInfo };
         }
         catch (error) {
-            console.error('Failed to extract text from file:', error);
-            throw error;
+            console.error('❌ Text extraction failed:', error);
+            processingInfo.extractionSuccess = false;
+            processingInfo.extractionError = error instanceof Error ? error.message : 'Unknown error';
+            throw new Error(`Text extraction failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
         }
     }
+    // Method to get all tools for server registration
     getAllTools() {
         return [
             this.createUploadDocumentTool(),

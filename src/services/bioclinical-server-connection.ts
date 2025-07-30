@@ -11,6 +11,7 @@ interface BioClinicalResponse {
   error?: {
     code: number;
     message: string;
+    data?: any;
   };
   id: string | number;
 }
@@ -31,33 +32,57 @@ export interface BioClinicalResult {
   processingTimeMs: number;
   model: string;
   entities: BioClinicalEntity[];
+  error?: string;
 }
 
+export interface BioClinicalModelInfo {
+  modelName: string;
+  isLoaded: boolean;
+  device: string;
+  supportedEntities: string[];
+  torchVersion: string;
+  entityMapping: Record<string, string>;
+}
+
+/**
+ * Connection service for BioClinical-Server MCP integration
+ * Handles communication with the Clinical-AI-Apollo/Medical-NER model server
+ */
 export class BioClinicalServerConnection {
   private baseUrl: string;
   private sessionId: string | null = null;
   private isInitialized = false;
   private requestId = 1;
+  private connectionTimeout = 30000; // 30 seconds
+  private healthCheckTimeout = 5000; // 5 seconds
 
   constructor(baseUrl: string = 'http://localhost:8001') {
-    this.baseUrl = baseUrl.replace(/\/$/, '');
+    this.baseUrl = baseUrl.replace(/\/$/, ''); // Remove trailing slash
+    console.log(`🧬 BioClinical Server Connection initialized for: ${this.baseUrl}`);
   }
 
+  /**
+   * Establish connection to BioClinical-Server
+   * Performs health check, MCP initialization, and tool discovery
+   */
   async connect(): Promise<void> {
     try {
-      console.log(`🧬 Connecting to BioClinical Server at: ${this.baseUrl}`);
+      console.log(`🔗 Connecting to BioClinical Server at: ${this.baseUrl}`);
       
-      // Health check
+      // Step 1: Health check
       const healthCheck = await this.checkServerHealth();
       if (!healthCheck.ok) {
-        throw new Error(`BioClinical Server not responding at ${this.baseUrl}`);
+        throw new Error(`BioClinical Server not responding at ${this.baseUrl}: ${healthCheck.error}`);
       }
+      console.log('✅ BioClinical Server health check passed');
 
-      // Initialize MCP connection
+      // Step 2: Initialize MCP connection
       const initResult = await this.sendRequest('initialize', {
         protocolVersion: '2024-11-05',
         capabilities: {
-          roots: { listChanged: false }
+          roots: { 
+            listChanged: false 
+          }
         },
         clientInfo: {
           name: 'medical-mcp-client',
@@ -65,29 +90,60 @@ export class BioClinicalServerConnection {
         }
       });
 
+      console.log('📡 MCP initialization successful:', initResult);
+
+      // Step 3: Send initialized notification
       await this.sendNotification('notifications/initialized', {});
 
-      // List available tools
+      // Step 4: Discover available tools
       const toolsResult = await this.sendRequest('tools/list', {});
-      console.log(`✅ BioClinical Server connected with ${toolsResult.tools?.length || 0} tools`);
+      const toolCount = toolsResult.tools?.length || 0;
       
+      console.log(`🛠️ BioClinical Server connected successfully!`);
+      console.log(`📊 Available tools: ${toolCount}`);
+      
+      if (toolsResult.tools) {
+        console.log('🔧 Tool details:');
+        toolsResult.tools.forEach((tool: any, index: number) => {
+          console.log(`   ${index + 1}. ${tool.name} - ${tool.description}`);
+        });
+      }
+
       this.isInitialized = true;
+      
     } catch (error) {
       console.error('❌ Failed to connect to BioClinical Server:', error);
       throw error;
     }
   }
 
+  /**
+   * Extract medical entities from text using BioClinical-Server
+   * @param text - Text to analyze for medical entities
+   * @param confidenceThreshold - Minimum confidence score (0.0-1.0)
+   * @param entityTypes - Optional filter for specific entity types
+   * @returns Promise<BioClinicalResult>
+   */
   async extractMedicalEntities(
     text: string,
     confidenceThreshold: number = 0.5,
     entityTypes?: string[]
   ): Promise<BioClinicalResult> {
     if (!this.isInitialized) {
-      throw new Error('BioClinical Server not connected');
+      throw new Error('BioClinical Server not connected. Call connect() first.');
+    }
+
+    if (!text || text.trim().length === 0) {
+      throw new Error('Text cannot be empty');
+    }
+
+    if (confidenceThreshold < 0 || confidenceThreshold > 1) {
+      throw new Error('Confidence threshold must be between 0.0 and 1.0');
     }
 
     try {
+      console.log(`🧬 Extracting medical entities from ${text.length} characters...`);
+      
       const result = await this.sendRequest('tools/call', {
         name: 'extractMedicalEntities',
         arguments: {
@@ -97,35 +153,124 @@ export class BioClinicalServerConnection {
         }
       });
 
-      return JSON.parse(result.content[0].text);
+      // Parse the result from the tool call
+      const parsedResult: BioClinicalResult = JSON.parse(result.content[0].text);
+      
+      console.log(`✅ Entity extraction completed: ${parsedResult.entitiesFound} entities found`);
+      
+      return parsedResult;
     } catch (error) {
-      console.error('Failed to extract medical entities:', error);
+      console.error('❌ Failed to extract medical entities:', error);
       throw error;
     }
   }
 
-  async getModelInfo(): Promise<any> {
-    const result = await this.sendRequest('tools/call', {
-      name: 'getModelInfo',
-      arguments: {}
-    });
+  /**
+   * Get information about the loaded BioClinical model
+   * @returns Promise<BioClinicalModelInfo>
+   */
+  async getModelInfo(): Promise<BioClinicalModelInfo> {
+    if (!this.isInitialized) {
+      throw new Error('BioClinical Server not connected. Call connect() first.');
+    }
 
-    return JSON.parse(result.content[0].text);
+    try {
+      console.log('📊 Retrieving BioClinical model information...');
+      
+      const result = await this.sendRequest('tools/call', {
+        name: 'getModelInfo',
+        arguments: {}
+      });
+
+      const modelInfo: BioClinicalModelInfo = JSON.parse(result.content[0].text);
+      
+      console.log(`✅ Model info retrieved: ${modelInfo.modelName}`);
+      
+      return modelInfo;
+    } catch (error) {
+      console.error('❌ Failed to get model info:', error);
+      throw error;
+    }
   }
 
+  /**
+   * Check if the connection is active and healthy
+   * @returns Promise<boolean>
+   */
+  async isConnected(): Promise<boolean> {
+    if (!this.isInitialized) {
+      return false;
+    }
+
+    try {
+      const health = await this.checkServerHealth();
+      return health.ok;
+    } catch (error) {
+      return false;
+    }
+  }
+
+  /**
+   * Disconnect from the BioClinical server
+   */
+  async disconnect(): Promise<void> {
+    this.isInitialized = false;
+    this.sessionId = null;
+    console.log('🔌 Disconnected from BioClinical Server');
+  }
+
+  /**
+   * Get connection status and statistics
+   */
+  getConnectionInfo(): {
+    baseUrl: string;
+    isInitialized: boolean;
+    hasSession: boolean;
+    sessionId: string | null;
+  } {
+    return {
+      baseUrl: this.baseUrl,
+      isInitialized: this.isInitialized,
+      hasSession: this.sessionId !== null,
+      sessionId: this.sessionId
+    };
+  }
+
+  // Private helper methods
+
+  /**
+   * Check server health and availability
+   */
   private async checkServerHealth(): Promise<{ ok: boolean; error?: string }> {
     try {
       const response = await fetch(`${this.baseUrl}/health`, {
         method: 'GET',
-        signal: AbortSignal.timeout(5000)
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        signal: AbortSignal.timeout(this.healthCheckTimeout)
       });
-      return { ok: response.ok };
+
+      if (response.ok) {
+        const health = await response.json();
+        console.log('💚 BioClinical Server health check passed:', health);
+        return { ok: true };
+      } else {
+        return { ok: false, error: `Server returned ${response.status}: ${response.statusText}` };
+      }
     } catch (error: any) {
       return { ok: false, error: error.message };
     }
   }
 
+  /**
+   * Send MCP request to the server
+   */
   private async sendRequest(method: string, params: any): Promise<any> {
+    if (!this.baseUrl) {
+      throw new Error('BioClinical Server not configured');
+    }
+
     const id = this.requestId++;
     const request: BioClinicalRequest = {
       jsonrpc: '2.0',
@@ -134,39 +279,60 @@ export class BioClinicalServerConnection {
       id
     };
 
-    const headers: Record<string, string> = {
-      'Content-Type': 'application/json'
-    };
+    try {
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json, text/event-stream'
+      };
 
-    if (this.sessionId) {
-      headers['mcp-session-id'] = this.sessionId;
+      // Add session ID if available
+      if (this.sessionId) {
+        headers['mcp-session-id'] = this.sessionId;
+      }
+
+      console.log(`📤 Sending BioClinical request: ${method}`, { 
+        id, 
+        sessionId: this.sessionId,
+        paramsKeys: Object.keys(params || {})
+      });
+
+      const response = await fetch(`${this.baseUrl}/mcp`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(request),
+        signal: AbortSignal.timeout(this.connectionTimeout)
+      });
+
+      // Extract session ID from response headers if present
+      const responseSessionId = response.headers.get('mcp-session-id');
+      if (responseSessionId && !this.sessionId) {
+        this.sessionId = responseSessionId;
+        console.log('🔑 Received session ID:', this.sessionId);
+      }
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`HTTP ${response.status}: ${response.statusText}. ${errorText}`);
+      }
+
+      const result = await response.json() as BioClinicalResponse;
+      
+      if (result.error) {
+        throw new Error(`BioClinical Server error [${result.error.code}]: ${result.error.message}`);
+      }
+
+      console.log(`📥 BioClinical response received for: ${method}`);
+      
+      return result.result;
+    } catch (error) {
+      console.error(`❌ BioClinical request failed [${method}]:`, error);
+      throw error;
     }
-
-    const response = await fetch(`${this.baseUrl}/mcp`, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(request),
-      signal: AbortSignal.timeout(30000)
-    });
-
-    const responseSessionId = response.headers.get('mcp-session-id');
-    if (responseSessionId && !this.sessionId) {
-      this.sessionId = responseSessionId;
-    }
-
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-    }
-
-    const result = await response.json() as BioClinicalResponse;
-    
-    if (result.error) {
-      throw new Error(`BioClinical Server error: ${result.error.message}`);
-    }
-
-    return result.result;
   }
 
+  /**
+   * Send MCP notification (no response expected)
+   */
   private async sendNotification(method: string, params: any): Promise<void> {
     const request = {
       jsonrpc: '2.0',
@@ -174,13 +340,117 @@ export class BioClinicalServerConnection {
       params
     };
 
-    await fetch(`${this.baseUrl}/mcp`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        ...(this.sessionId && { 'mcp-session-id': this.sessionId })
-      },
-      body: JSON.stringify(request)
-    });
+    try {
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json'
+      };
+
+      if (this.sessionId) {
+        headers['mcp-session-id'] = this.sessionId;
+      }
+
+      console.log(`📢 Sending BioClinical notification: ${method}`);
+
+      await fetch(`${this.baseUrl}/mcp`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(request),
+        signal: AbortSignal.timeout(this.connectionTimeout)
+      });
+
+      console.log(`✅ BioClinical notification sent: ${method}`);
+    } catch (error) {
+      console.error(`❌ BioClinical notification failed [${method}]:`, error);
+      // Don't throw for notifications - they're fire-and-forget
+    }
+  }
+
+  /**
+   * Validate text input for entity extraction
+   */
+  private validateTextInput(text: string): void {
+    if (!text || typeof text !== 'string') {
+      throw new Error('Text must be a non-empty string');
+    }
+
+    if (text.trim().length === 0) {
+      throw new Error('Text cannot be empty or only whitespace');
+    }
+
+    if (text.length > 100000) { // 100KB limit
+      throw new Error('Text is too long (max 100,000 characters)');
+    }
+  }
+
+  /**
+   * Retry mechanism for failed requests
+   */
+  private async retryRequest<T>(
+    operation: () => Promise<T>,
+    maxRetries: number = 3,
+    delay: number = 1000
+  ): Promise<T> {
+    let lastError: Error;
+
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        return await operation();
+      } catch (error) {
+        lastError = error as Error;
+        
+        if (attempt === maxRetries) {
+          break;
+        }
+
+        console.warn(`⚠️ BioClinical request attempt ${attempt} failed, retrying in ${delay}ms...`);
+        await new Promise(resolve => setTimeout(resolve, delay));
+        delay *= 2; // Exponential backoff
+      }
+    }
+
+    throw lastError!;
+  }
+
+  /**
+   * Batch entity extraction for multiple texts
+   */
+  async extractMedicalEntitiesBatch(
+    texts: string[],
+    confidenceThreshold: number = 0.5,
+    entityTypes?: string[]
+  ): Promise<BioClinicalResult[]> {
+    if (!Array.isArray(texts) || texts.length === 0) {
+      throw new Error('Texts must be a non-empty array');
+    }
+
+    console.log(`🧬 Starting batch entity extraction for ${texts.length} texts...`);
+
+    const results: BioClinicalResult[] = [];
+    const batchSize = 5; // Process in chunks to avoid overwhelming the server
+
+    for (let i = 0; i < texts.length; i += batchSize) {
+      const batch = texts.slice(i, i + batchSize);
+      console.log(`📦 Processing batch ${Math.floor(i / batchSize) + 1}/${Math.ceil(texts.length / batchSize)}`);
+
+      const batchPromises = batch.map(text => 
+        this.extractMedicalEntities(text, confidenceThreshold, entityTypes)
+      );
+
+      try {
+        const batchResults = await Promise.all(batchPromises);
+        results.push(...batchResults);
+      } catch (error) {
+        console.error(`❌ Batch processing failed at batch ${Math.floor(i / batchSize) + 1}:`, error);
+        throw error;
+      }
+
+      // Small delay between batches to be server-friendly
+      if (i + batchSize < texts.length) {
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
+    }
+
+    console.log(`✅ Batch entity extraction completed: ${results.length} results`);
+    return results;
   }
 }

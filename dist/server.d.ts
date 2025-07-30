@@ -3,12 +3,12 @@ export declare class MedicalMCPServer {
     private app?;
     private mongoClient;
     private localEmbeddingService;
-    private nerService;
     private ocrService;
     private pdfService;
     private documentTools;
     private medicalTools;
     private localEmbeddingTools;
+    private bioClinicalConnection;
     private sessions;
     constructor();
     private setupHandlers;

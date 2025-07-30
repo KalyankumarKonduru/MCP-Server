@@ -56,7 +56,7 @@ export class MongoDBClient {
       throw error;
     }
   }
-
+  
   async disconnect(): Promise<void> {
     await this.client.close();
     console.log('Disconnected from MongoDB Atlas');
@@ -170,6 +170,7 @@ export class MongoDBClient {
       return this.textSearchFallback('', limit);
     }
   }
+
   async textSearch(query: string, limit: number = 10, filter?: Record<string, any>): Promise<SearchResult[]> {
     try {
       console.log('🔍 Starting text search for:', query);
@@ -226,7 +227,6 @@ export class MongoDBClient {
       return this.textSearchFallback(query, limit);
     }
   }
-  
 
   private async textSearchFallback(query: string, limit: number = 10): Promise<SearchResult[]> {
     try {
@@ -390,5 +390,66 @@ export class MongoDBClient {
       console.error('Failed to get patient documents:', error);
       throw error;
     }
+  }
+
+  // ====== MISSING METHODS REQUIRED BY UPDATED TOOLS ======
+
+  /**
+   * Get documents by filter with pagination support
+   * Required by DocumentTools and MedicalTools
+   */
+  async getDocumentsByFilter(
+    filter: Record<string, any> = {}, 
+    limit: number = 20, 
+    offset: number = 0
+  ): Promise<MedicalDocument[]> {
+    // Use existing findDocuments method
+    return await this.findDocuments(filter, limit, offset);
+  }
+
+  /**
+   * Search documents using text search with filters
+   * Required by MedicalTools - returns documents directly (not SearchResult[])
+   */
+  async searchDocuments(
+    query: string, 
+    filter?: Record<string, any>, 
+    limit: number = 10
+  ): Promise<MedicalDocument[]> {
+    try {
+      // Use existing textSearch but return just documents
+      const searchResults = await this.textSearch(query, limit, filter);
+      return searchResults.map(result => result.document);
+    } catch (error) {
+      console.error('❌ Document search failed:', error);
+      
+      // Fallback to basic filter-based search
+      const basicFilter: any = {};
+      
+      if (query) {
+        basicFilter.$or = [
+          { title: { $regex: query, $options: 'i' } },
+          { content: { $regex: query, $options: 'i' } }
+        ];
+      }
+      
+      if (filter) {
+        Object.assign(basicFilter, filter);
+      }
+      
+      return await this.findDocuments(basicFilter, limit);
+    }
+  }
+
+  /**
+   * List documents with filtering and pagination
+   * Required by DocumentTools - alias for getDocumentsByFilter
+   */
+  async listDocuments(
+    limit: number = 20,
+    offset: number = 0,
+    filter?: Record<string, any>
+  ): Promise<MedicalDocument[]> {
+    return await this.getDocumentsByFilter(filter || {}, limit, offset);
   }
 }

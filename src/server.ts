@@ -17,7 +17,9 @@ import dotenv from 'dotenv';
 
 import { MongoDBClient } from './db/mongodb-client.js';
 import { LocalEmbeddingService } from './services/local-embedding-service.js';
-import { MedicalNERService } from './services/medical-ner-service.js';
+//import { MedicalNERService } from './services/medical-ner-service.js';
+import { BioClinicalServerConnection } from './services/bioclinical-server-connection.js';
+import { EntityMappingService } from './services/entity-mapping-service.js';
 import { OCRService } from './services/ocr-service.js';
 import { PDFService } from './services/pdf-service.js';
 import { DocumentTools } from './tools/document-tools.js';
@@ -57,12 +59,13 @@ export class MedicalMCPServer {
   private app?: express.Application;
   private mongoClient: MongoDBClient;
   private localEmbeddingService: LocalEmbeddingService;
-  private nerService: MedicalNERService;
+  //private nerService: MedicalNERService;
   private ocrService: OCRService;
   private pdfService: PDFService;
   private documentTools: DocumentTools;
   private medicalTools: MedicalTools;
   private localEmbeddingTools: LocalEmbeddingTools;
+  private bioClinicalConnection: BioClinicalServerConnection;
 
   // Session management for HTTP mode
   private sessions: Map<string, MCPSession> = new Map();
@@ -79,7 +82,10 @@ export class MedicalMCPServer {
     // Initialize services
     this.mongoClient = new MongoDBClient(mongoConnectionString, dbName);
     this.localEmbeddingService = new LocalEmbeddingService();
-    this.nerService = new MedicalNERService();
+    //this.nerService = new MedicalNERService();
+    this.bioClinicalConnection = new BioClinicalServerConnection(
+      process.env.BIOCLINICAL_SERVER_URL || 'http://localhost:8001'
+    );
     this.ocrService = new OCRService();
     this.pdfService = new PDFService();
 
@@ -87,14 +93,16 @@ export class MedicalMCPServer {
     this.documentTools = new DocumentTools(
       this.mongoClient,
       this.localEmbeddingService,
-      this.nerService,
+      //this.nerService
+      this.bioClinicalConnection,
       this.ocrService,
       this.pdfService
     );
 
     this.medicalTools = new MedicalTools(
       this.mongoClient,
-      this.nerService,
+      //this.nerService
+      this.bioClinicalConnection,
       this.localEmbeddingService
     );
 
@@ -157,7 +165,7 @@ export class MedicalMCPServer {
           'extractMedicalEntities': () => this.medicalTools.handleExtractMedicalEntities(args as any || {}),
           'findSimilarCases': () => this.medicalTools.handleFindSimilarCases(args as any || {}),
           'analyzePatientHistory': () => this.medicalTools.handleAnalyzePatientHistory(args as any || {}),
-          'getMedicalInsights': () => this.medicalTools.handleMedicalInsights(args as any || {}),
+          'getMedicalInsights': () => this.medicalTools.handleGetMedicalInsights(args as any || {}),
 
           // Local embedding tools
           'generateEmbeddingLocal': () => this.localEmbeddingTools.handleGenerateEmbedding(args as any || {}),
@@ -277,6 +285,8 @@ export class MedicalMCPServer {
       // Initialize OCR service
       await this.ocrService.initialize();
       logger.log('✅ OCR service initialized');
+      await this.bioClinicalConnection.connect();
+      logger.log('✅ BioClinical server connected');
 
       // Start the appropriate transport
       if (isHttpMode) {
