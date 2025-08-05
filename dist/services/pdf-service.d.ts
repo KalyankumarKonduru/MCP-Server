@@ -26,44 +26,14 @@ export interface PDFProcessingOptions {
     preserveFormatting?: boolean;
 }
 export declare class PDFService {
+    private pdfExtract;
     constructor();
     parsePDF(filePath: string, options?: PDFProcessingOptions): Promise<PDFParseResult>;
     parsePDFBuffer(buffer: Buffer, options?: PDFProcessingOptions): Promise<PDFParseResult>;
-    private extractTextFromPDFBuffer;
-    private extractFromPDFStreams;
-    private extractFromTextObjects;
-    private extractSimpleText;
-    private isBinaryStream;
-    private isLikelyText;
-    private extractBasicMetadata;
-    private estimatePageCount;
+    private processExtractedData;
+    private extractTextFromPage;
+    private extractMetadata;
+    private parsePDFDate;
     private cleanText;
-    private preserveFormatting;
-    private extractPageRange;
-    extractMedicalInformation(filePath: string): Promise<{
-        text: string;
-        medicalSections: Record<string, string>;
-        confidence: number;
-    }>;
-    private identifyMedicalSections;
-    private calculateMedicalConfidence;
-    validatePDF(filePath: string): Promise<{
-        isValid: boolean;
-        isMedical: boolean;
-        confidence: number;
-        issues: string[];
-    }>;
-    extractTextByPages(filePath: string): Promise<Array<{
-        pageNumber: number;
-        text: string;
-    }>>;
-    getSupportedFormats(): string[];
-    getDocumentInfo(filePath: string): Promise<{
-        fileName: string;
-        fileSize: number;
-        pageCount: number;
-        isEncrypted: boolean;
-        metadata: any;
-    }>;
 }
 //# sourceMappingURL=pdf-service.d.ts.map
