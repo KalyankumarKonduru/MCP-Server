@@ -33,6 +33,8 @@ export declare class MongoDBClient {
     private documentsCollection;
     private entitiesCollection;
     constructor(connectionString: string, dbName?: string);
+    getDocument(documentId: string): Promise<MedicalDocument | null>;
+    updateDocumentEntities(documentId: string, entities: MedicalEntity[]): Promise<void>;
     connect(): Promise<void>;
     disconnect(): Promise<void>;
     private createBasicIndexes;

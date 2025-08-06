@@ -3,7 +3,7 @@ import { MongoDBClient } from '../db/mongodb-client.js';
 import { BioClinicalServerConnection } from '../services/bioclinical-server-connection.js';
 import { LocalEmbeddingService } from '../services/local-embedding-service.js';
 export interface ExtractMedicalEntitiesRequest {
-    text: string;
+    text?: string;
     documentId?: string;
     entityTypes?: string[];
     confidenceThreshold?: number;

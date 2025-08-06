@@ -1,4 +1,4 @@
-import { MongoClient } from 'mongodb';
+import { MongoClient, ObjectId } from 'mongodb';
 export class MongoDBClient {
     client;
     db;
@@ -9,6 +9,44 @@ export class MongoDBClient {
         this.db = this.client.db(dbName);
         this.documentsCollection = this.db.collection('documents');
         this.entitiesCollection = this.db.collection('entities');
+    }
+    async getDocument(documentId) {
+        try {
+            const objectId = new ObjectId(documentId);
+            const document = await this.documentsCollection.findOne({ _id: objectId });
+            if (!document) {
+                return null;
+            }
+            // Convert MongoDB document to MedicalDocument type
+            return {
+                _id: document._id.toString(),
+                title: document.title,
+                content: document.content,
+                embedding: document.embedding,
+                medicalEntities: document.medicalEntities || [],
+                metadata: document.metadata
+            };
+        }
+        catch (error) {
+            console.error('Failed to fetch document:', error);
+            throw error;
+        }
+    }
+    async updateDocumentEntities(documentId, entities) {
+        try {
+            const objectId = new ObjectId(documentId);
+            await this.documentsCollection.updateOne({ _id: objectId }, {
+                $set: {
+                    medicalEntities: entities,
+                    'metadata.processed': true // Mark as processed
+                }
+            });
+            console.log(`✅ Updated ${entities.length} entities for document: ${documentId}`);
+        }
+        catch (error) {
+            console.error('Failed to update document entities:', error);
+            throw error;
+        }
     }
     async connect() {
         try {

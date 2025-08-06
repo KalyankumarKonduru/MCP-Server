@@ -1,4 +1,4 @@
-import { MongoClient, Db, Collection } from 'mongodb';
+import { MongoClient, Db, Collection, ObjectId } from 'mongodb';
 
 export interface MedicalDocument {
   _id?: string;
@@ -43,6 +43,49 @@ export class MongoDBClient {
     this.documentsCollection = this.db.collection<MedicalDocument>('documents');
     this.entitiesCollection = this.db.collection<MedicalEntity>('entities');
   }
+  async getDocument(documentId: string): Promise<MedicalDocument | null> {
+  try {
+    const objectId = new ObjectId(documentId);
+    const document = await this.documentsCollection.findOne({ _id: objectId as any });
+    
+    if (!document) {
+      return null;
+    }
+    
+    // Convert MongoDB document to MedicalDocument type
+    return {
+      _id: document._id.toString(),
+      title: document.title,
+      content: document.content,
+      embedding: document.embedding,
+      medicalEntities: document.medicalEntities || [],
+      metadata: document.metadata
+    };
+  } catch (error) {
+    console.error('Failed to fetch document:', error);
+    throw error;
+  }
+}
+async updateDocumentEntities(documentId: string, entities: MedicalEntity[]): Promise<void> {
+  try {
+    const objectId = new ObjectId(documentId);
+    
+    await this.documentsCollection.updateOne(
+      { _id: objectId as any },
+      { 
+        $set: { 
+          medicalEntities: entities,
+          'metadata.processed': true  // Mark as processed
+        }
+      }
+    );
+    
+    console.log(`✅ Updated ${entities.length} entities for document: ${documentId}`);
+  } catch (error) {
+    console.error('Failed to update document entities:', error);
+    throw error;
+  }
+}
 
   async connect(): Promise<void> {
     try {

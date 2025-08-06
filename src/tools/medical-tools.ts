@@ -5,7 +5,7 @@ import { EntityMappingService, MappedEntity } from '../services/entity-mapping-s
 import { LocalEmbeddingService } from '../services/local-embedding-service.js';
 
 export interface ExtractMedicalEntitiesRequest {
-  text: string;
+  text?: string;  // Made optional to support documentId-only requests
   documentId?: string;
   entityTypes?: string[];
   confidenceThreshold?: number;
@@ -54,7 +54,7 @@ export class MedicalTools {
   createExtractMedicalEntitiesTool(): Tool {
     return {
       name: 'extractMedicalEntities',
-      description: 'Extract medical entities (medications, conditions, procedures, etc.) from text using Clinical-AI-Apollo/Medical-NER model',
+      description: 'Extract medical entities from text or a stored document using Clinical-AI-Apollo/Medical-NER model',
       inputSchema: {
         type: 'object',
         properties: {
@@ -64,7 +64,7 @@ export class MedicalTools {
           },
           documentId: {
             type: 'string',
-            description: 'Optional document ID to update with extracted entities'
+            description: 'ID of a stored document to analyze'
           },
           entityTypes: {
             type: 'array',
@@ -82,19 +82,96 @@ export class MedicalTools {
             description: 'Minimum confidence threshold for entity extraction'
           }
         },
-        required: ['text']
+        oneOf: [
+          { required: ['text'] },
+          { required: ['documentId'] }
+        ]
       }
     };
   }
 
   async handleExtractMedicalEntities(args: ExtractMedicalEntitiesRequest): Promise<any> {
     try {
+      let textToProcess = args.text;
+      let documentTitle = '';
+      
+      // If no text provided but documentId is present, fetch the document
+      if (!textToProcess && args.documentId) {
+        console.log(`📄 Fetching document with ID: ${args.documentId}`);
+        
+        // Fetch the document from MongoDB
+        const document = await this.mongoClient.getDocument(args.documentId);
+        
+        if (!document) {
+          throw new Error(`Document not found with ID: ${args.documentId}`);
+        }
+        
+        textToProcess = document.content;
+        documentTitle = document.title;
+        
+        // If entities were already extracted during upload, return them
+        if (document.medicalEntities && document.medicalEntities.length > 0) {
+          console.log(`✅ Returning previously extracted entities for document: ${args.documentId}`);
+          
+          // Map to MappedEntity format for consistency
+          const mappedEntities: MappedEntity[] = document.medicalEntities.map(entity => ({
+            text: entity.text,
+            label: entity.label,
+            confidence: entity.confidence,
+            start: entity.start,
+            end: entity.end,
+            context: undefined
+          }));
+          
+          // Filter by entity types if specified
+          let filteredEntities = mappedEntities;
+          if (args.entityTypes && args.entityTypes.length > 0) {
+            filteredEntities = mappedEntities.filter(entity => 
+              args.entityTypes!.includes(entity.label)
+            );
+          }
+          
+          const entitiesByType = EntityMappingService.getEntityStatistics(filteredEntities);
+          
+          return {
+            content: [
+              {
+                type: 'text',
+                text: JSON.stringify({
+                  success: true,
+                  documentId: args.documentId,
+                  documentTitle: documentTitle,
+                  entitiesFound: filteredEntities.length,
+                  entitiesByType,
+                  entities: filteredEntities.map(entity => ({
+                    text: entity.text,
+                    label: entity.label,
+                    confidence: entity.confidence,
+                    start: entity.start,
+                    end: entity.end
+                  })),
+                  message: 'Entities retrieved from stored document',
+                  cached: true,
+                  processingModel: 'Clinical-AI-Apollo/Medical-NER'
+                }, null, 2)
+              }
+            ]
+          };
+        }
+      }
+      
+      // Validate that we have text to process
+      if (!textToProcess || textToProcess.trim().length === 0) {
+        throw new Error('Text cannot be empty. Please provide text or a valid documentId.');
+      }
+      
       console.log('🧬 Extracting medical entities using BioClinical-Server...');
+      console.log(`🧬 Extracting medical entities from ${textToProcess.length} characters...`);
       
       // Extract entities using BioClinical server
       const confidenceThreshold = args.confidenceThreshold || 0.5;
       const bioClinicalResult = await this.bioClinicalConnection.extractMedicalEntities(
-        args.text,
+        textToProcess,
         confidenceThreshold
       );
 
@@ -114,9 +191,17 @@ export class MedicalTools {
 
       // Update document if ID provided
       if (args.documentId) {
-        await this.mongoClient.updateDocument(args.documentId, {
-          medicalEntities: mappedEntities
-        });
+        // Convert MappedEntity[] to MedicalEntity[] for storage
+        const medicalEntities: MedicalEntity[] = mappedEntities.map(entity => ({
+          text: entity.text,
+          label: entity.label,
+          confidence: entity.confidence,
+          start: entity.start,
+          end: entity.end
+        }));
+        
+        await this.mongoClient.updateDocumentEntities(args.documentId, medicalEntities);
+        console.log(`💾 Updated document ${args.documentId} with ${medicalEntities.length} entities`);
       }
 
       // Generate statistics
@@ -124,6 +209,8 @@ export class MedicalTools {
 
       const result = {
         success: true,
+        documentId: args.documentId,
+        documentTitle: documentTitle || undefined,
         entitiesFound: mappedEntities.length,
         confidence: bioClinicalResult.confidence,
         entitiesByType,
@@ -136,6 +223,7 @@ export class MedicalTools {
           context: entity.context?.substring(0, 100) + ((entity.context?.length || 0) > 100 ? '...' : '')
         })),
         documentUpdated: !!args.documentId,
+        cached: false,
         processingModel: 'Clinical-AI-Apollo/Medical-NER',
         processingTimeMs: bioClinicalResult.processingTimeMs,
         modelInfo: {
@@ -159,6 +247,7 @@ export class MedicalTools {
       const errorResult = {
         success: false,
         error: error instanceof Error ? error.message : 'Unknown error',
+        documentId: args.documentId,
         processingModel: 'Clinical-AI-Apollo/Medical-NER',
         timestamp: new Date().toISOString()
       };
