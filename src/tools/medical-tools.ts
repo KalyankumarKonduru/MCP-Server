@@ -5,7 +5,7 @@ import { EntityMappingService, MappedEntity } from '../services/entity-mapping-s
 import { LocalEmbeddingService } from '../services/local-embedding-service.js';
 
 export interface ExtractMedicalEntitiesRequest {
-  text?: string;  // Made optional to support documentId-only requests
+  text?: string;
   documentId?: string;
   entityTypes?: string[];
   confidenceThreshold?: number;
